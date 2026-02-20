@@ -31,13 +31,13 @@ class TestVerification:
         verification = Verification(
             name="TestPlayer",
             level=25,
-            regiment=True,
+            regiment="[TAG] Test Regiment",
             colonial=False,
             shard="ABLE",
         )
         assert verification.name == "TestPlayer"
         assert verification.level == 25
-        assert verification.regiment is True
+        assert verification.regiment == "[TAG] Test Regiment"
         assert verification.colonial is False
         assert verification.shard == "ABLE"
 

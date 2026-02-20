@@ -8,8 +8,8 @@ class Verification(BaseModel):
 
     name: str | None = Field(default=None, description="Player name")
     level: int | None = Field(default=None, description="Player level")
-    regiment: bool | None = Field(
-        default=None, description="Whether player is in a regiment (None=unknown)"
+    regiment: str | None = Field(
+        default=None, description="Regiment name if player is in a regiment, None otherwise"
     )
     colonial: bool | None = Field(default=None, description="Whether player is colonial faction")
     shard: str | None = Field(default=None, description="Game shard identifier")

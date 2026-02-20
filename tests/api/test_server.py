@@ -104,24 +104,29 @@ class TestLifespan:
         from verification_ocr.services import get_war_state
 
         state = get_war_state()
-        state.war_number = None
-        state.start_time = None
 
         mock_app = MagicMock(spec=FastAPI)
 
         with patch(
-            "verification_ocr.api.server.sync_war_from_api",
-        ) as mock_sync:
-            # Simulate successful API sync
-            async def mock_sync_success():
-                state.war_number = 132
-                state.start_time = 1770663602746
-                return True
+            "verification_ocr.api.server.initialize_war_state_from_settings",
+        ):
+            # State remains unconfigured after initialize
+            state.war_number = None
+            state.start_time = None
 
-            mock_sync.side_effect = mock_sync_success
+            with patch(
+                "verification_ocr.api.server.sync_war_from_api",
+            ) as mock_sync:
+                # Simulate successful API sync
+                async def mock_sync_success():
+                    state.war_number = 132
+                    state.start_time = 1770663602746
+                    return True
 
-            async with lifespan(mock_app):
-                mock_sync.assert_called_once()
+                mock_sync.side_effect = mock_sync_success
+
+                async with lifespan(mock_app):
+                    mock_sync.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_lifespan_logs_warning_when_war_state_not_configured_after_sync(
@@ -140,23 +145,28 @@ class TestLifespan:
         from verification_ocr.services import get_war_state
 
         state = get_war_state()
-        state.war_number = None
-        state.start_time = None
 
         mock_app = MagicMock(spec=FastAPI)
 
         with patch(
-            "verification_ocr.api.server.sync_war_from_api",
-            return_value=False,
+            "verification_ocr.api.server.initialize_war_state_from_settings",
         ):
+            # State remains unconfigured after initialize
+            state.war_number = None
+            state.start_time = None
+
             with patch(
-                "verification_ocr.api.server.logger.warning",
-            ) as mock_warning:
-                async with lifespan(mock_app):
-                    # Should log warning since war state still not configured
-                    mock_warning.assert_called_once_with(
-                        "War state not configured and could not be fetched from API"
-                    )
+                "verification_ocr.api.server.sync_war_from_api",
+                return_value=False,
+            ):
+                with patch(
+                    "verification_ocr.api.server.logger.warning",
+                ) as mock_warning:
+                    async with lifespan(mock_app):
+                        # Should log warning since war state still not configured
+                        mock_warning.assert_called_once_with(
+                            "War state not configured and could not be fetched from API"
+                        )
 
 
 class TestCreateApp:

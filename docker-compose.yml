@@ -6,10 +6,8 @@ services:
     container_name: verification-ocr
     ports:
       - "127.0.0.1:8000:8000"
-    environment:
-      - VOCR_LOGGING__LEVEL=INFO
-      - VOCR_OCR__LANGUAGE=eng
-      - VOCR_OCR__DEBUG_MODE=${VOCR_OCR__DEBUG_MODE:-false}
+    env_file:
+      - .env
     volumes:
       # Debug screenshots output
       - ./screenshots:/app/screenshots

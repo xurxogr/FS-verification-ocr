@@ -273,6 +273,71 @@ class VerificationService:
 
         return np.asarray(a=result, dtype=np.uint8)
 
+    def _prepare_image_for_text_detection(
+        self,
+        image: cv2.typing.MatLike,
+        scale_factor: float,
+        use_inv: bool = True,
+    ) -> cv2.typing.MatLike:
+        """Apply preprocessing to image for text detection (stockpile name style).
+
+        Uses foxhole_stockpiles preprocessing technique for grey background regions.
+
+        Args:
+            image (cv2.typing.MatLike): Image region to preprocess.
+            scale_factor (float): Resolution scale factor.
+            use_inv (bool): Whether to use inverted thresholding.
+
+        Returns:
+            cv2.typing.MatLike: Processed image ready for OCR.
+        """
+        if image is None or image.size == 0:
+            return image
+
+        # Convert to grayscale
+        gray = cv2.cvtColor(src=image, code=cv2.COLOR_BGR2GRAY)
+
+        # Upscale based on scale factor
+        upscale_factor = 2 / scale_factor
+        upscaled = cv2.resize(
+            src=gray,
+            dsize=None,
+            fx=upscale_factor,
+            fy=upscale_factor,
+            interpolation=cv2.INTER_CUBIC,
+        )
+
+        # Calculate threshold from this region's pixel distribution
+        unique_values, counts = np.unique(upscaled, return_counts=True)
+        most_common_value = unique_values[np.argmax(counts)]
+        threshold_value = most_common_value + 120 * (1 - most_common_value / 255)
+
+        if use_inv:
+            threshold_mode = cv2.THRESH_BINARY_INV
+        else:
+            threshold_mode = cv2.THRESH_BINARY
+            threshold_value -= 30
+
+        # Zero out pixels below threshold
+        upscaled[upscaled < threshold_value] = 0
+
+        # Apply binary threshold
+        _, binary = cv2.threshold(
+            src=upscaled,
+            thresh=TESSERACT_BINARY_THRESHOLD,
+            maxval=255,
+            type=threshold_mode,
+        )
+
+        # Dilate to connect text components
+        kernel = cv2.getStructuringElement(shape=cv2.MORPH_RECT, ksize=(3, 3))
+        binary = cv2.dilate(src=binary, kernel=kernel, iterations=1)
+
+        # Convert back to RGB for tesseract
+        result = cv2.cvtColor(src=binary, code=cv2.COLOR_GRAY2RGB)
+
+        return np.asarray(a=result, dtype=np.uint8)
+
     def _find_colonial_icon(self, image: cv2.typing.MatLike) -> bool | None:
         """
         Find the colonial icon in the image using template matching.
@@ -347,10 +412,10 @@ class VerificationService:
                 "x2": int(3.2 * px),
             },
             "regiment": {
-                "y1": int(1.4 * py),
-                "y2": int(1.5 * py),
-                "x1": 0,
-                "x2": width,
+                "y1": int(1.22 * py),
+                "y2": int(1.34 * py),
+                "x1": int(2.4 * px),
+                "x2": int(3.5 * px),
             },
             "shard": {
                 "y1": shard_y,
@@ -401,22 +466,22 @@ class VerificationService:
             thickness=thickness,
         )
 
-        # Draw regiment region (blue)
+        # Draw regiment region (magenta)
         r = regions["regiment"]
         cv2.rectangle(
             img=debug_img,
             pt1=(r["x1"], r["y1"]),
             pt2=(r["x2"], r["y2"]),
-            color=(255, 0, 0),
+            color=(255, 0, 255),
             thickness=thickness,
         )
         cv2.putText(
             img=debug_img,
             text="REGIMENT",
-            org=(r["x1"] + 10, r["y1"] - 5),
+            org=(r["x1"], r["y1"] - 5),
             fontFace=cv2.FONT_HERSHEY_SIMPLEX,
             fontScale=scale * 0.5,
-            color=(255, 0, 0),
+            color=(255, 0, 255),
             thickness=thickness,
         )
 
@@ -484,15 +549,53 @@ class VerificationService:
         # Check for colonial faction icon
         data.colonial = self._find_colonial_icon(username_image)
 
-        # Extract Regiment info
+        # Extract Regiment name from grey bar region
         r = regions["regiment"]
         regiment_image = image[r["y1"] : r["y2"], r["x1"] : r["x2"]]
-        ocr_text = self._extract_text_from_image(regiment_image)
-        count = len(ocr_text.split("Name"))
-        # 1 = None, 2 = False, 3 = True
-        data.regiment = None if count == 1 else count == 3
+        regiment_text = self._extract_text_from_image(regiment_image, scale=True)
+        data.regiment = self._parse_regiment_name(regiment_text)
 
         return data
+
+    def _parse_regiment_name(self, text: str) -> str | None:
+        """
+        Parse regiment name from OCR text.
+
+        Format: [TAG#NUM] Regiment Name (something) - we extract [TAG#NUM] Regiment Name
+
+        Args:
+            text (str): Raw OCR text from regiment name region.
+
+        Returns:
+            str | None: Parsed regiment name or None if not found.
+        """
+        if not text:
+            return None
+
+        # Clean up the text
+        text = text.strip()
+
+        # Look for regiment tag format: [TAG#NUM] Name
+        # Find the start of the tag
+        bracket_start = text.find("[")
+        if bracket_start == -1:
+            return None
+
+        # Extract from the bracket onwards
+        text = text[bracket_start:]
+
+        # Remove anything after ( as it's usually "(Players)" or similar UI text
+        if "(" in text:
+            text = text.split("(")[0].strip()
+
+        # Remove anything after | as it could be "| Players" tab
+        if "|" in text:
+            text = text.split("|")[0].strip()
+
+        # Remove newlines and extra spaces
+        text = " ".join(text.split())
+
+        return text if text else None
 
     def _get_shard_and_time(
         self,

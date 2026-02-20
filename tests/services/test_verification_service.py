@@ -16,6 +16,80 @@ from verification_ocr.services.verification_service import (
 )
 
 
+class TestParseRegimentName:
+    """Tests for _parse_regiment_name method."""
+
+    def test_returns_none_for_empty_text(self, mock_settings: AppSettings) -> None:
+        """
+        Test that None is returned for empty text.
+
+        Args:
+            mock_settings (AppSettings): Mock settings fixture.
+
+        Returns:
+            None
+        """
+        service = VerificationService(mock_settings)
+        result = service._parse_regiment_name("")
+        assert result is None
+
+    def test_extracts_regiment_with_tag(self, mock_settings: AppSettings) -> None:
+        """
+        Test extraction of regiment name with tag.
+
+        Args:
+            mock_settings (AppSettings): Mock settings fixture.
+
+        Returns:
+            None
+        """
+        service = VerificationService(mock_settings)
+        result = service._parse_regiment_name("[TAG] My Regiment")
+        assert result == "[TAG] My Regiment"
+
+    def test_removes_players_suffix(self, mock_settings: AppSettings) -> None:
+        """
+        Test that '| Players' suffix is removed.
+
+        Args:
+            mock_settings (AppSettings): Mock settings fixture.
+
+        Returns:
+            None
+        """
+        service = VerificationService(mock_settings)
+        result = service._parse_regiment_name("[I PHAETON 7th Hispanic Platoon | Players")
+        assert result == "[I PHAETON 7th Hispanic Platoon"
+
+    def test_cleans_whitespace(self, mock_settings: AppSettings) -> None:
+        """
+        Test that extra whitespace is cleaned up.
+
+        Args:
+            mock_settings (AppSettings): Mock settings fixture.
+
+        Returns:
+            None
+        """
+        service = VerificationService(mock_settings)
+        result = service._parse_regiment_name("[TAG]   My   Regiment  ")
+        assert result == "[TAG] My Regiment"
+
+    def test_returns_none_for_whitespace_only(self, mock_settings: AppSettings) -> None:
+        """
+        Test that None is returned for whitespace-only text.
+
+        Args:
+            mock_settings (AppSettings): Mock settings fixture.
+
+        Returns:
+            None
+        """
+        service = VerificationService(mock_settings)
+        result = service._parse_regiment_name("   ")
+        assert result is None
+
+
 class TestExtractDayAndHour:
     """Tests for extract_day_and_hour function."""
 
@@ -642,6 +716,89 @@ class TestVerificationServiceSaveDebugImage:
         )
 
         assert os.path.exists(tmp_path / "test_debug.png")
+
+
+class TestVerificationServicePrepareImageForTextDetection:
+    """Tests for _prepare_image_for_text_detection method."""
+
+    def test_returns_image_unchanged_when_none(
+        self,
+        mock_settings: AppSettings,
+    ) -> None:
+        """
+        Test that None is returned when image is None.
+
+        Args:
+            mock_settings (AppSettings): Mock settings fixture.
+
+        Returns:
+            None
+        """
+        service = VerificationService(mock_settings)
+        result = service._prepare_image_for_text_detection(image=None, scale_factor=1.0)
+        assert result is None
+
+    def test_returns_image_unchanged_when_empty(
+        self,
+        mock_settings: AppSettings,
+    ) -> None:
+        """
+        Test that empty image is returned unchanged.
+
+        Args:
+            mock_settings (AppSettings): Mock settings fixture.
+
+        Returns:
+            None
+        """
+        service = VerificationService(mock_settings)
+        empty_img = np.array([], dtype=np.uint8)
+        result = service._prepare_image_for_text_detection(image=empty_img, scale_factor=1.0)
+        assert result.size == 0
+
+    def test_processes_valid_image_with_inv(
+        self,
+        mock_settings: AppSettings,
+    ) -> None:
+        """
+        Test that valid image is processed correctly with use_inv=True.
+
+        Args:
+            mock_settings (AppSettings): Mock settings fixture.
+
+        Returns:
+            None
+        """
+        service = VerificationService(mock_settings)
+        img = np.ones((100, 100, 3), dtype=np.uint8) * 128
+        result = service._prepare_image_for_text_detection(
+            image=img, scale_factor=1.0, use_inv=True
+        )
+        assert result is not None
+        assert result.size > 0
+        assert len(result.shape) == 3  # RGB output
+
+    def test_processes_valid_image_without_inv(
+        self,
+        mock_settings: AppSettings,
+    ) -> None:
+        """
+        Test that valid image is processed correctly with use_inv=False.
+
+        Args:
+            mock_settings (AppSettings): Mock settings fixture.
+
+        Returns:
+            None
+        """
+        service = VerificationService(mock_settings)
+        img = np.ones((100, 100, 3), dtype=np.uint8) * 128
+        result = service._prepare_image_for_text_detection(
+            image=img, scale_factor=1.0, use_inv=False
+        )
+        assert result is not None
+        assert result.size > 0
+        assert len(result.shape) == 3  # RGB output
 
 
 class TestVerificationServicePrepareImageForShardDetection:
@@ -1379,3 +1536,53 @@ class TestVerificationServiceIntegration:
             result["verification"]["shard"] is not None
             or result["verification"]["ingame_time"] is not None
         )
+
+    def test_verify_extracts_regiment_name_from_colonial(
+        self,
+        mock_settings: AppSettings,
+        colonial_image_bytes: bytes,
+        stockpile_image_bytes: bytes,
+    ) -> None:
+        """
+        Test regiment name extraction from colonial user screenshot.
+
+        Args:
+            mock_settings (AppSettings): Mock settings fixture.
+            colonial_image_bytes (bytes): Real colonial user screenshot.
+            stockpile_image_bytes (bytes): Real stockpile screenshot.
+
+        Returns:
+            None
+        """
+        service = VerificationService(mock_settings)
+        result = service.verify(colonial_image_bytes, stockpile_image_bytes)
+
+        assert result["success"] is True
+        # Colonial user is in a regiment - regiment field contains the name
+        assert result["verification"]["regiment"] is not None
+        # Should contain "7th Hispanic Platoon" (regiment name)
+        assert "7th Hispanic Platoon" in result["verification"]["regiment"]
+
+    def test_verify_warden_has_no_regiment(
+        self,
+        mock_settings: AppSettings,
+        warden_image_bytes: bytes,
+        stockpile_image_bytes: bytes,
+    ) -> None:
+        """
+        Test that warden user without regiment has None for regiment.
+
+        Args:
+            mock_settings (AppSettings): Mock settings fixture.
+            warden_image_bytes (bytes): Real warden user screenshot.
+            stockpile_image_bytes (bytes): Real stockpile screenshot.
+
+        Returns:
+            None
+        """
+        service = VerificationService(mock_settings)
+        result = service.verify(warden_image_bytes, stockpile_image_bytes)
+
+        assert result["success"] is True
+        # Warden user is not in a regiment - regiment is None
+        assert result["verification"]["regiment"] is None
