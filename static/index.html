@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Verification OCR</title>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .upload-area {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        .upload-box {
+            flex: 1;
+            border: 2px dashed #ccc;
+            border-radius: 8px;
+            padding: 20px;
+            text-align: center;
+            transition: border-color 0.3s;
+        }
+        .upload-box:hover {
+            border-color: #007bff;
+        }
+        .upload-box.has-file {
+            border-color: #28a745;
+            border-style: solid;
+        }
+        .upload-box h3 {
+            margin-top: 0;
+            color: #555;
+        }
+        .upload-box input[type="file"] {
+            display: none;
+        }
+        .upload-box label {
+            display: block;
+            padding: 15px;
+            background: #007bff;
+            color: white;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        .upload-box label:hover {
+            background: #0056b3;
+        }
+        .preview {
+            max-width: 100%;
+            max-height: 200px;
+            margin-top: 15px;
+            border-radius: 4px;
+        }
+        .filename {
+            margin-top: 10px;
+            font-size: 0.9em;
+            color: #666;
+            word-break: break-all;
+        }
+        button {
+            width: 100%;
+            padding: 15px;
+            font-size: 18px;
+            background: #28a745;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        button:hover {
+            background: #218838;
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .result {
+            margin-top: 30px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            display: none;
+        }
+        .result.show {
+            display: block;
+        }
+        .result h2 {
+            margin-top: 0;
+            color: #333;
+        }
+        .result pre {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 15px;
+            border-radius: 5px;
+            overflow-x: auto;
+            font-size: 13px;
+        }
+        .error {
+            color: #dc3545;
+            background: #f8d7da;
+            padding: 15px;
+            border-radius: 5px;
+            margin-top: 20px;
+        }
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: #666;
+        }
+        .war-info {
+            background: #2c3e50;
+            color: white;
+            padding: 15px 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .war-info.not-configured {
+            background: #6c757d;
+        }
+        .war-number {
+            font-size: 1.4em;
+            font-weight: bold;
+        }
+        .war-time {
+            text-align: right;
+        }
+        .war-time .day {
+            font-size: 1.2em;
+            font-weight: bold;
+        }
+        .war-time .time {
+            font-size: 1.5em;
+            font-family: monospace;
+        }
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #007bff;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 10px;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Verification OCR Service</h1>
+
+        <div id="warInfo" class="war-info" style="display: none;">
+            <div class="war-number">
+                War <span id="warNumber">-</span>
+            </div>
+            <div class="war-time">
+                <div class="day">Day <span id="warDay">-</span></div>
+                <div class="time"><span id="warHour">--</span>:<span id="warMinute">--</span></div>
+            </div>
+        </div>
+
+        <p style="text-align: center; color: #666;">
+            Upload two images to extract and compare their content using OCR.
+        </p>
+
+        <form id="verifyForm">
+            <div class="upload-area">
+                <div class="upload-box" id="box1">
+                    <h3>Image 1</h3>
+                    <input type="file" id="image1" name="image1" accept="image/*" required>
+                    <label for="image1">Select Image</label>
+                    <img class="preview" id="preview1" style="display: none;">
+                    <div class="filename" id="filename1"></div>
+                </div>
+                <div class="upload-box" id="box2">
+                    <h3>Image 2</h3>
+                    <input type="file" id="image2" name="image2" accept="image/*" required>
+                    <label for="image2">Select Image</label>
+                    <img class="preview" id="preview2" style="display: none;">
+                    <div class="filename" id="filename2"></div>
+                </div>
+            </div>
+            <button type="submit" id="submitBtn">Verify Images</button>
+        </form>
+
+        <div id="loading" class="loading" style="display: none;">
+            <div class="spinner"></div>
+            Processing images...
+        </div>
+
+        <div id="result" class="result">
+            <h2>Result</h2>
+            <pre id="resultJson"></pre>
+        </div>
+
+        <div id="error" class="error" style="display: none;"></div>
+    </div>
+
+    <script>
+        // Preview images on selection
+        function setupPreview(inputId, previewId, filenameId, boxId) {
+            const input = document.getElementById(inputId);
+            const preview = document.getElementById(previewId);
+            const filename = document.getElementById(filenameId);
+            const box = document.getElementById(boxId);
+
+            input.addEventListener('change', function(e) {
+                const file = e.target.files[0];
+                if (file) {
+                    const reader = new FileReader();
+                    reader.onload = function(e) {
+                        preview.src = e.target.result;
+                        preview.style.display = 'block';
+                    };
+                    reader.readAsDataURL(file);
+                    filename.textContent = file.name;
+                    box.classList.add('has-file');
+                } else {
+                    preview.style.display = 'none';
+                    filename.textContent = '';
+                    box.classList.remove('has-file');
+                }
+            });
+        }
+
+        setupPreview('image1', 'preview1', 'filename1', 'box1');
+        setupPreview('image2', 'preview2', 'filename2', 'box2');
+
+        // Form submission
+        document.getElementById('verifyForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+
+            const formData = new FormData();
+            const image1 = document.getElementById('image1').files[0];
+            const image2 = document.getElementById('image2').files[0];
+
+            if (!image1 || !image2) {
+                showError('Please select both images.');
+                return;
+            }
+
+            formData.append('image1', image1);
+            formData.append('image2', image2);
+
+            const loading = document.getElementById('loading');
+            const result = document.getElementById('result');
+            const error = document.getElementById('error');
+            const submitBtn = document.getElementById('submitBtn');
+
+            // Reset state
+            error.style.display = 'none';
+            result.classList.remove('show');
+            loading.style.display = 'block';
+            submitBtn.disabled = true;
+
+            try {
+                const response = await fetch('/verify', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    document.getElementById('resultJson').textContent =
+                        JSON.stringify(data, null, 2);
+                    result.classList.add('show');
+                } else {
+                    showError(data.detail || 'An error occurred');
+                }
+            } catch (err) {
+                showError('Failed to connect to server: ' + err.message);
+            } finally {
+                loading.style.display = 'none';
+                submitBtn.disabled = false;
+            }
+        });
+
+        function showError(message) {
+            const error = document.getElementById('error');
+            error.textContent = message;
+            error.style.display = 'block';
+        }
+
+        // War info display
+        let warStartTime = null;
+
+        async function fetchWarInfo() {
+            try {
+                const response = await fetch('/war');
+                const data = await response.json();
+
+                const warInfoEl = document.getElementById('warInfo');
+
+                if (data.war_number !== null || data.start_time !== null) {
+                    warInfoEl.style.display = 'flex';
+                    warInfoEl.classList.remove('not-configured');
+
+                    if (data.war_number !== null) {
+                        document.getElementById('warNumber').textContent = data.war_number;
+                    }
+
+                    if (data.start_time !== null) {
+                        warStartTime = data.start_time;
+                        updateWarTime();
+                    }
+                } else {
+                    warInfoEl.style.display = 'flex';
+                    warInfoEl.classList.add('not-configured');
+                    document.getElementById('warNumber').textContent = 'Not configured';
+                    document.getElementById('warDay').textContent = '-';
+                    document.getElementById('warHour').textContent = '--';
+                    document.getElementById('warMinute').textContent = '--';
+                }
+            } catch (err) {
+                console.error('Failed to fetch war info:', err);
+            }
+        }
+
+        function updateWarTime() {
+            if (warStartTime === null) return;
+
+            const now = Date.now();
+            const elapsedMs = now - warStartTime;
+            const elapsedHours = elapsedMs / (1000 * 60 * 60);
+
+            // 1 real hour = 1 in-game day (game starts at Day 1, not Day 0)
+            const warDay = Math.floor(elapsedHours) + 1;
+            const fraction = elapsedHours % 1;
+            const warHour = Math.floor(fraction * 24);
+            const warMinute = Math.floor((fraction * 24 % 1) * 60);
+
+            document.getElementById('warDay').textContent = warDay;
+            document.getElementById('warHour').textContent = String(warHour).padStart(2, '0');
+            document.getElementById('warMinute').textContent = String(warMinute).padStart(2, '0');
+        }
+
+        // Fetch war info on page load
+        fetchWarInfo();
+
+        // Update war time every second
+        setInterval(updateWarTime, 1000);
+    </script>
+</body>
+</html>

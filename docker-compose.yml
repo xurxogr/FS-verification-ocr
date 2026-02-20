@@ -1,0 +1,24 @@
+services:
+  verification-ocr:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: verification-ocr
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      - VOCR_LOGGING__LEVEL=INFO
+      - VOCR_OCR__LANGUAGE=eng
+      - VOCR_OCR__DEBUG_MODE=${VOCR_OCR__DEBUG_MODE:-false}
+    volumes:
+      # Debug screenshots output
+      - ./screenshots:/app/screenshots
+      # Optional: mount custom tessdata for additional languages
+      # - ./tessdata:/usr/share/tesseract-ocr/4.00/tessdata:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
