@@ -1,5 +1,6 @@
 """Pytest configuration and fixtures."""
 
+from collections.abc import Generator
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -11,7 +12,6 @@ from verification_ocr.core.settings.app_settings import (
     APIServerSettings,
     LoggingSettings,
     OCRSettings,
-    VerificationSettings,
 )
 
 
@@ -40,9 +40,6 @@ def mock_settings() -> AppSettings:
         logging=LoggingSettings(
             log_level="DEBUG",
             log_format="%(message)s",
-        ),
-        verification=VerificationSettings(
-            max_ingame_time_diff=999999,  # High value in days for unit tests
         ),
     )
 
@@ -173,7 +170,7 @@ def reset_war_state() -> None:
 
 
 @pytest.fixture
-def mock_tesseract_available():
+def mock_tesseract_available() -> Generator[MagicMock, None, None]:
     """
     Mock tesseract as available.
 
@@ -194,7 +191,7 @@ def mock_tesseract_available():
 
 
 @pytest.fixture
-def mock_tesseract_unavailable():
+def mock_tesseract_unavailable() -> Generator[MagicMock, None, None]:
     """
     Mock tesseract as unavailable.
 

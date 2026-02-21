@@ -1,6 +1,7 @@
 """Tests for application settings."""
 
 import os
+import pathlib
 from unittest.mock import patch
 
 import pytest
@@ -10,7 +11,6 @@ from verification_ocr.core.settings.app_settings import (
     AppSettings,
     LoggingSettings,
     OCRSettings,
-    VerificationSettings,
     WarSettings,
 )
 
@@ -65,26 +65,6 @@ class TestAPIServerSettings:
         assert settings.port == 9000
         assert settings.workers == 4
         assert settings.cors_allow_origins == ["http://localhost:3000"]
-
-
-class TestVerificationSettings:
-    """Tests for VerificationSettings."""
-
-    def test_default_max_ingame_time_diff(self) -> None:
-        """
-        Test default max_ingame_time_diff in days.
-
-        """
-        settings = VerificationSettings()
-        assert settings.max_ingame_time_diff == 25
-
-    def test_custom_max_ingame_time_diff(self) -> None:
-        """
-        Test custom max_ingame_time_diff in days.
-
-        """
-        settings = VerificationSettings(max_ingame_time_diff=5)
-        assert settings.max_ingame_time_diff == 5
 
 
 class TestOCRSettings:
@@ -177,7 +157,7 @@ class TestOCRSettings:
         with pytest.raises(ValidationError, match="Tesseract binary not found"):
             OCRSettings(tesseract_cmd="/nonexistent/tesseract")
 
-    def test_custom_tesseract_cmd_not_executable_raises(self, tmp_path) -> None:
+    def test_custom_tesseract_cmd_not_executable_raises(self, tmp_path: pathlib.Path) -> None:
         """
         Test custom tesseract_cmd raises error if file exists but is not executable.
 
@@ -229,7 +209,7 @@ class TestOCRSettings:
         # Validator returns None for non-existent paths (icon is optional)
         assert settings.colonial_icon_path is None
 
-    def test_custom_colonial_icon_path_valid(self, tmp_path) -> None:
+    def test_custom_colonial_icon_path_valid(self, tmp_path: pathlib.Path) -> None:
         """
         Test custom colonial_icon_path with valid file.
 
@@ -381,14 +361,6 @@ class TestAppSettings:
         """
         settings = AppSettings()
         assert isinstance(settings.war, WarSettings)
-
-    def test_default_verification(self) -> None:
-        """
-        Test default verification settings.
-
-        """
-        settings = AppSettings()
-        assert isinstance(settings.verification, VerificationSettings)
 
     def test_env_prefix(self) -> None:
         """

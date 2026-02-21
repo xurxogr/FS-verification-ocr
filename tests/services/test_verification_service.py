@@ -1,11 +1,14 @@
 """Tests for verification service."""
 
 import os
+import pathlib
+from typing import Any
 from unittest.mock import patch
 
 import cv2
 import numpy as np
 import pytesseract
+import pytest
 
 from verification_ocr.core.settings import AppSettings
 from verification_ocr.models import ImageRegions, Region
@@ -449,7 +452,7 @@ class TestVerificationServiceExtractText:
 
         """
         service = VerificationService(mock_settings)
-        result = service._extract_text_from_image(None)
+        result = service._extract_text_from_image(None)  # type: ignore[arg-type]
         assert result == ""
 
     def test_extract_text_returns_empty_for_empty_image(
@@ -483,6 +486,7 @@ class TestVerificationServiceExtractText:
         """
         nparr = np.frombuffer(buffer=sample_image_bytes, dtype=np.uint8)
         img = cv2.imdecode(buf=nparr, flags=cv2.IMREAD_COLOR)
+        assert img is not None
 
         with patch(
             "verification_ocr.services.verification_service.pytesseract.image_to_string",
@@ -507,6 +511,7 @@ class TestVerificationServiceExtractText:
         """
         nparr = np.frombuffer(buffer=sample_image_bytes, dtype=np.uint8)
         img = cv2.imdecode(buf=nparr, flags=cv2.IMREAD_COLOR)
+        assert img is not None
 
         with patch(
             "verification_ocr.services.verification_service.pytesseract.image_to_string",
@@ -531,6 +536,7 @@ class TestVerificationServiceExtractText:
         """
         nparr = np.frombuffer(buffer=sample_image_bytes, dtype=np.uint8)
         img = cv2.imdecode(buf=nparr, flags=cv2.IMREAD_COLOR)
+        assert img is not None
 
         with patch(
             "verification_ocr.services.verification_service.pytesseract.image_to_string",
@@ -559,6 +565,7 @@ class TestVerificationServiceFindColonialIcon:
         """
         nparr = np.frombuffer(buffer=sample_image_bytes, dtype=np.uint8)
         img = cv2.imdecode(buf=nparr, flags=cv2.IMREAD_COLOR)
+        assert img is not None
 
         service = VerificationService(mock_settings)
         result = service._find_colonial_icon(img)
@@ -579,6 +586,7 @@ class TestVerificationServiceFindColonialIcon:
         """
         nparr = np.frombuffer(buffer=sample_image_bytes, dtype=np.uint8)
         img = cv2.imdecode(buf=nparr, flags=cv2.IMREAD_COLOR)
+        assert img is not None
 
         service = VerificationService(mock_settings)
         # Set a mock colonial icon
@@ -586,6 +594,29 @@ class TestVerificationServiceFindColonialIcon:
 
         result = service._find_colonial_icon(img)
         assert isinstance(result, bool)
+
+    def test_find_user_info_sets_faction_colonial(
+        self,
+        mock_settings: AppSettings,
+    ) -> None:
+        """
+        Test that faction is set to COLONIAL when colonial icon is found.
+
+        Args:
+            mock_settings (AppSettings): Mock settings fixture.
+
+        """
+        from verification_ocr.enums import Faction
+
+        img = np.ones((2160, 3840, 3), dtype=np.uint8) * 255
+        service = VerificationService(mock_settings)
+        regions = service._calculate_regions(img)
+
+        with patch.object(service, "_extract_text_from_image", return_value="TestPlayer"):
+            with patch.object(service, "_find_colonial_icon", return_value=True):
+                result = service._find_user_info(img, regions)
+
+                assert result.faction == Faction.COLONIAL
 
 
 class TestVerificationServiceCalculateRegions:
@@ -651,7 +682,7 @@ class TestVerificationServiceSaveDebugImage:
     def test_save_debug_image_creates_file(
         self,
         mock_settings: AppSettings,
-        tmp_path,
+        tmp_path: pathlib.Path,
     ) -> None:
         """
         Test that debug image is saved to file.
@@ -679,7 +710,7 @@ class TestVerificationServiceSaveDebugImage:
     def test_save_debug_image_rejects_invalid_filename(
         self,
         mock_settings: AppSettings,
-        tmp_path,
+        tmp_path: pathlib.Path,
     ) -> None:
         """
         Test that invalid filenames are rejected.
@@ -709,7 +740,7 @@ class TestVerificationServiceSaveDebugImage:
     def test_save_debug_image_strips_path_components(
         self,
         mock_settings: AppSettings,
-        tmp_path,
+        tmp_path: pathlib.Path,
     ) -> None:
         """
         Test that path components are stripped from filename.
@@ -741,7 +772,7 @@ class TestVerificationServiceSaveDebugImage:
     def test_save_debug_image_rejects_symlink_traversal(
         self,
         mock_settings: AppSettings,
-        tmp_path,
+        tmp_path: pathlib.Path,
     ) -> None:
         """
         Test that symlink-based path traversal is rejected.
@@ -801,7 +832,7 @@ class TestVerificationServicePrepareImageForShardDetection:
 
         """
         service = VerificationService(mock_settings)
-        result = service._prepare_image_for_shard_detection(image=None, scale_factor=1.0)
+        result = service._prepare_image_for_shard_detection(image=None, scale_factor=1.0)  # type: ignore[arg-type]
         assert result is None
 
     def test_returns_image_unchanged_when_empty(
@@ -943,13 +974,13 @@ class TestVerificationServiceGetShardAndTime:
 class TestVerificationServiceVerify:
     """Tests for verify method."""
 
-    def test_verify_returns_error_for_invalid_images(
+    def test_verify_raises_error_for_invalid_images(
         self,
         mock_settings: AppSettings,
         invalid_image_bytes: bytes,
     ) -> None:
         """
-        Test that error is returned for invalid images.
+        Test that ValueError is raised for invalid images.
 
         Args:
             mock_settings (AppSettings): Mock settings fixture.
@@ -957,17 +988,15 @@ class TestVerificationServiceVerify:
 
         """
         service = VerificationService(mock_settings)
-        result = service.verify(invalid_image_bytes, invalid_image_bytes)
+        with pytest.raises(ValueError, match="Failed to decode"):
+            service.verify(invalid_image_bytes, invalid_image_bytes)
 
-        assert result.success is False
-        assert "Failed to decode" in result.error
-
-    def test_verify_returns_error_when_no_name_found(
+    def test_verify_raises_error_when_no_name_found(
         self,
         mock_settings: AppSettings,
     ) -> None:
         """
-        Test that error is returned when no name is found.
+        Test that ValueError is raised when no name is found.
 
         Args:
             mock_settings (AppSettings): Mock settings fixture.
@@ -983,10 +1012,8 @@ class TestVerificationServiceVerify:
             return_value="",
         ):
             service = VerificationService(mock_settings)
-            result = service.verify(image_bytes, image_bytes)
-
-            assert result.success is False
-            assert "No name found" in result.error
+            with pytest.raises(ValueError, match="No name found"):
+                service.verify(image_bytes, image_bytes)
 
     def test_verify_extracts_user_info(
         self,
@@ -1006,7 +1033,7 @@ class TestVerificationServiceVerify:
 
         call_count = [0]
 
-        def mock_ocr(*args, **kwargs) -> str:
+        def mock_ocr(*args: Any, **kwargs: Any) -> str:
             call_count[0] += 1
             if call_count[0] == 1:
                 return "TestPlayer"  # username region
@@ -1023,9 +1050,8 @@ class TestVerificationServiceVerify:
             service = VerificationService(mock_settings)
             result = service.verify(image_bytes, image_bytes)
 
-            assert result.success is True
-            assert result.verification.name == "TestPlayer"
-            assert result.verification.level == 25
+            assert result.name == "TestPlayer"
+            assert result.level == 25
 
     def test_verify_handles_malformed_ocr_text(
         self,
@@ -1046,7 +1072,7 @@ class TestVerificationServiceVerify:
 
         call_count = [0]
 
-        def mock_ocr(*args, **kwargs) -> str:
+        def mock_ocr(*args: Any, **kwargs: Any) -> str:
             call_count[0] += 1
             if call_count[0] == 1:
                 return "TestPlayer"  # username region
@@ -1064,9 +1090,8 @@ class TestVerificationServiceVerify:
             result = service.verify(image_bytes, image_bytes)
 
             # Should not crash - name extracted but level parsing failed gracefully
-            assert result.success is True
-            assert result.verification.name == "TestPlayer"
-            assert result.verification.level is None
+            assert result.name == "TestPlayer"
+            assert result.level is None
 
     def test_verify_handles_level_with_colon_but_no_digits(
         self,
@@ -1087,7 +1112,7 @@ class TestVerificationServiceVerify:
 
         call_count = [0]
 
-        def mock_ocr(*args, **kwargs) -> str:
+        def mock_ocr(*args: Any, **kwargs: Any) -> str:
             call_count[0] += 1
             if call_count[0] == 1:
                 return "TestPlayer"  # username region
@@ -1104,9 +1129,8 @@ class TestVerificationServiceVerify:
             service = VerificationService(mock_settings)
             result = service.verify(image_bytes, image_bytes)
 
-            assert result.success is True
-            assert result.verification.name == "TestPlayer"
-            assert result.verification.level is None
+            assert result.name == "TestPlayer"
+            assert result.level is None
 
     def test_verify_logs_info(
         self,
@@ -1132,7 +1156,8 @@ class TestVerificationServiceVerify:
                 "verification_ocr.services.verification_service.logger.info",
             ) as mock_log:
                 service = VerificationService(mock_settings)
-                service.verify(image_bytes, image_bytes)
+                with pytest.raises(ValueError):
+                    service.verify(image_bytes, image_bytes)
 
                 mock_log.assert_called_once_with("Processing image pair for verification")
 
@@ -1153,7 +1178,7 @@ class TestVerificationServiceVerify:
 
         call_count = [0]
 
-        def mock_ocr(*args, **kwargs) -> str:
+        def mock_ocr(*args: Any, **kwargs: Any) -> str:
             call_count[0] += 1
             # Call 1: first image username -> empty (no name found, returns early)
             # Call 2: second image username -> return name
@@ -1177,13 +1202,12 @@ class TestVerificationServiceVerify:
             service = VerificationService(mock_settings)
             result = service.verify(image_bytes, image_bytes)
 
-            assert result.success is True
-            assert result.verification.name == "SecondPlayer"
+            assert result.name == "SecondPlayer"
 
     def test_verify_saves_debug_images_when_debug_mode(
         self,
         mock_settings: AppSettings,
-        tmp_path,
+        tmp_path: pathlib.Path,
     ) -> None:
         """
         Test that debug images are saved when debug mode is enabled.
@@ -1227,7 +1251,7 @@ class TestVerificationServiceVerify:
 
         call_count = [0]
 
-        def mock_ocr(*args, **kwargs) -> str:
+        def mock_ocr(*args: Any, **kwargs: Any) -> str:
             call_count[0] += 1
             # Call 1: username extraction for image1
             # Call 2: regiment extraction for image1
@@ -1245,16 +1269,15 @@ class TestVerificationServiceVerify:
             service = VerificationService(mock_settings)
             result = service.verify(image_bytes, image_bytes)
 
-            assert result.success is True
-            assert result.verification.shard == "ABLE"
-            assert result.verification.ingame_time == "1234, 15:30"
+            assert result.shard == "ABLE"
+            assert result.ingame_time == "1234, 15:30"
 
-    def test_verify_fails_when_time_diff_exceeds_max(
+    def test_verify_includes_war_number_and_current_ingame_time(
         self,
         mock_settings: AppSettings,
     ) -> None:
         """
-        Test that verify fails when in-game time diff exceeds max.
+        Test that verify includes war_number and current_ingame_time in result.
 
         Args:
             mock_settings (AppSettings): Mock settings fixture.
@@ -1262,17 +1285,14 @@ class TestVerificationServiceVerify:
         """
         import time
 
-        from verification_ocr.core.settings.app_settings import VerificationSettings
         from verification_ocr.services import get_war_service
 
-        # Set up war state with current time
+        # Set up war state
         war_service = get_war_service()
         war_service.initialize(
-            start_time=int((time.time() - 100 * 60 * 60) * 1000)
-        )  # 100 hours ago
-
-        # Set strict max time diff (1 day = 24 hours)
-        mock_settings.verification = VerificationSettings(max_ingame_time_diff=1)
+            war_number=132,
+            start_time=int((time.time() - 100 * 60 * 60) * 1000),
+        )
 
         img = np.ones((2160, 3840, 3), dtype=np.uint8) * 255
         _, buffer = cv2.imencode(".png", img)
@@ -1280,14 +1300,13 @@ class TestVerificationServiceVerify:
 
         call_count = [0]
 
-        def mock_ocr(*args, **kwargs) -> str:
+        def mock_ocr(*args: Any, **kwargs: Any) -> str:
             call_count[0] += 1
             if call_count[0] == 1:
                 return "TestPlayer Icon Level: 25\n"
             if call_count[0] == 2:
                 return ""
-            # Return a time that's way off from current (day 1 instead of day 101)
-            return "1, 0000\nABLE"
+            return "100, 1200\nABLE"
 
         with patch(
             "verification_ocr.services.verification_service.pytesseract.image_to_string",
@@ -1296,16 +1315,15 @@ class TestVerificationServiceVerify:
             service = VerificationService(mock_settings)
             result = service.verify(image_bytes, image_bytes)
 
-            assert result.success is False
-            assert "In-game time difference" in result.error
-            assert result.verification is not None
+            assert result.war_number == 132
+            assert result.current_ingame_time is not None
 
-    def test_verify_skips_time_validation_when_ingame_time_none(
+    def test_verify_returns_ingame_time_none_when_ocr_empty(
         self,
         mock_settings: AppSettings,
     ) -> None:
         """
-        Test that time validation is skipped when ingame_time is None.
+        Test that ingame_time is None when OCR returns empty shard region.
 
         Args:
             mock_settings (AppSettings): Mock settings fixture.
@@ -1317,7 +1335,7 @@ class TestVerificationServiceVerify:
 
         call_count = [0]
 
-        def mock_ocr(*args, **kwargs) -> str:
+        def mock_ocr(*args: Any, **kwargs: Any) -> str:
             call_count[0] += 1
             if call_count[0] == 1:
                 return "TestPlayer Icon Level: 25\n"
@@ -1333,60 +1351,14 @@ class TestVerificationServiceVerify:
             service = VerificationService(mock_settings)
             result = service.verify(image_bytes, image_bytes)
 
-            # Should succeed since time validation is skipped
-            assert result.success is True
-            assert result.verification.ingame_time is None
+            assert result.ingame_time is None
 
-    def test_verify_skips_time_validation_when_time_cannot_be_parsed(
+    def test_verify_returns_result_when_war_not_configured(
         self,
         mock_settings: AppSettings,
     ) -> None:
         """
-        Test that time validation is skipped when ingame_time cannot be parsed.
-
-        Args:
-            mock_settings (AppSettings): Mock settings fixture.
-
-        """
-        import time
-
-        from verification_ocr.services import get_war_service
-
-        # Set up war state so current_time is available
-        war_service = get_war_service()
-        war_service.initialize(start_time=int((time.time() - 100 * 60 * 60) * 1000))
-
-        img = np.ones((2160, 3840, 3), dtype=np.uint8) * 255
-        _, buffer = cv2.imencode(".png", img)
-        image_bytes = buffer.tobytes()
-
-        call_count = [0]
-
-        def mock_ocr(*args, **kwargs) -> str:
-            call_count[0] += 1
-            if call_count[0] == 1:
-                return "TestPlayer Icon Level: 25\n"
-            if call_count[0] == 2:
-                return ""
-            # Return invalid time format that cannot be parsed
-            return "invalid_time\nABLE"
-
-        with patch(
-            "verification_ocr.services.verification_service.pytesseract.image_to_string",
-            side_effect=mock_ocr,
-        ):
-            service = VerificationService(mock_settings)
-            result = service.verify(image_bytes, image_bytes)
-
-            # Should succeed since parsed_time is None
-            assert result.success is True
-
-    def test_verify_skips_time_validation_when_war_not_configured(
-        self,
-        mock_settings: AppSettings,
-    ) -> None:
-        """
-        Test that time validation is skipped when war state not configured.
+        Test that verify returns result when war state not configured.
 
         Args:
             mock_settings (AppSettings): Mock settings fixture.
@@ -1400,7 +1372,7 @@ class TestVerificationServiceVerify:
 
         call_count = [0]
 
-        def mock_ocr(*args, **kwargs) -> str:
+        def mock_ocr(*args: Any, **kwargs: Any) -> str:
             call_count[0] += 1
             if call_count[0] == 1:
                 return "TestPlayer Icon Level: 25\n"
@@ -1416,60 +1388,9 @@ class TestVerificationServiceVerify:
             service = VerificationService(mock_settings)
             result = service.verify(image_bytes, image_bytes)
 
-            # Should succeed since current_time is None (war not configured)
-            assert result.success is True
-            assert result.verification.ingame_time == "100, 12:00"
-
-    def test_verify_succeeds_when_time_diff_within_max(
-        self,
-        mock_settings: AppSettings,
-    ) -> None:
-        """
-        Test that verify succeeds when time diff is within max allowed.
-
-        Covers the branch where time validation passes (time_diff <= max_diff).
-
-        Args:
-            mock_settings (AppSettings): Mock settings fixture.
-
-        """
-        import time
-
-        from verification_ocr.core.settings.app_settings import VerificationSettings
-        from verification_ocr.services import get_war_service
-
-        # Set up war state - 100 hours ago means we're on day 101
-        war_service = get_war_service()
-        war_service.initialize(start_time=int((time.time() - 100 * 60 * 60) * 1000))
-
-        # Set max time diff to 3 days (plenty of room)
-        mock_settings.verification = VerificationSettings(max_ingame_time_diff=3)
-
-        img = np.ones((2160, 3840, 3), dtype=np.uint8) * 255
-        _, buffer = cv2.imencode(".png", img)
-        image_bytes = buffer.tobytes()
-
-        call_count = [0]
-
-        def mock_ocr(*args, **kwargs) -> str:
-            call_count[0] += 1
-            if call_count[0] == 1:
-                return "TestPlayer Icon Level: 25\n"
-            if call_count[0] == 2:
-                return ""
-            # Return time close to current (day 101, hour 0)
-            return "101, 0000\nABLE"
-
-        with patch(
-            "verification_ocr.services.verification_service.pytesseract.image_to_string",
-            side_effect=mock_ocr,
-        ):
-            service = VerificationService(mock_settings)
-            result = service.verify(image_bytes, image_bytes)
-
-            # Should succeed since time diff is within max
-            assert result.success is True
-            assert result.verification.ingame_time == "101, 00:00"
+            assert result.ingame_time == "100, 12:00"
+            assert result.war_number is None
+            assert result.current_ingame_time is None
 
 
 class TestVerificationServiceIntegration:
@@ -1493,9 +1414,8 @@ class TestVerificationServiceIntegration:
         service = VerificationService(mock_settings)
         result = service.verify(colonial_image_bytes, stockpile_image_bytes)
 
-        assert result.success is True
-        assert result.verification.name is not None
-        assert result.verification.level is not None
+        assert result.name is not None
+        assert result.level is not None
 
     def test_verify_warden_with_real_images(
         self,
@@ -1512,16 +1432,17 @@ class TestVerificationServiceIntegration:
             stockpile_image_bytes (bytes): Real stockpile screenshot.
 
         """
+        from verification_ocr.enums import Faction
+
         service = VerificationService(mock_settings)
         result = service.verify(warden_image_bytes, stockpile_image_bytes)
 
-        assert result.success is True
-        assert result.verification.name is not None
-        assert result.verification.level is not None
-        # Warden should not be detected as colonial (False or None if template not configured)
-        assert result.verification.colonial is not True
-        # Warden image has no regiment (False or None)
-        assert result.verification.regiment is not True
+        assert result.name is not None
+        assert result.level is not None
+        # Warden should not be detected as colonial (WARDENS or None if template not configured)
+        assert result.faction != Faction.COLONIAL
+        # Warden image has no regiment
+        assert result.regiment is None
 
     def test_verify_extracts_shard_from_real_image(
         self,
@@ -1541,9 +1462,8 @@ class TestVerificationServiceIntegration:
         service = VerificationService(mock_settings)
         result = service.verify(colonial_image_bytes, stockpile_image_bytes)
 
-        assert result.success is True
         # Shard should be extracted from stockpile image
-        assert result.verification.shard is not None or result.verification.ingame_time is not None
+        assert result.shard is not None or result.ingame_time is not None
 
     def test_verify_extracts_regiment_name_from_colonial(
         self,
@@ -1563,11 +1483,10 @@ class TestVerificationServiceIntegration:
         service = VerificationService(mock_settings)
         result = service.verify(colonial_image_bytes, stockpile_image_bytes)
 
-        assert result.success is True
         # Colonial user is in a regiment - regiment field contains the name
-        assert result.verification.regiment is not None
+        assert result.regiment is not None
         # Should contain "7th Hispanic Platoon" (regiment name)
-        assert "7th Hispanic Platoon" in result.verification.regiment
+        assert "7th Hispanic Platoon" in result.regiment
 
     def test_verify_warden_has_no_regiment(
         self,
@@ -1587,16 +1506,15 @@ class TestVerificationServiceIntegration:
         service = VerificationService(mock_settings)
         result = service.verify(warden_image_bytes, stockpile_image_bytes)
 
-        assert result.success is True
         # Warden user is not in a regiment - regiment is None
-        assert result.verification.regiment is None
+        assert result.regiment is None
 
-    def test_verify_returns_error_for_too_small_image(
+    def test_verify_raises_error_for_too_small_image(
         self,
         mock_settings: AppSettings,
     ) -> None:
         """
-        Test that error is returned when image is too small.
+        Test that ValueError is raised when image is too small.
 
         Args:
             mock_settings (AppSettings): Mock settings fixture.
@@ -1615,16 +1533,12 @@ class TestVerificationServiceIntegration:
         service = VerificationService(mock_settings)
 
         # Test first image too small
-        result = service.verify(tiny_bytes, valid_bytes)
-        assert result.success is False
-        assert "too small" in result.error
-        assert "Image 1" in result.error
+        with pytest.raises(ValueError, match="Image 1.*too small"):
+            service.verify(tiny_bytes, valid_bytes)
 
         # Test second image too small
-        result = service.verify(valid_bytes, tiny_bytes)
-        assert result.success is False
-        assert "too small" in result.error
-        assert "Image 2" in result.error
+        with pytest.raises(ValueError, match="Image 2.*too small"):
+            service.verify(valid_bytes, tiny_bytes)
 
     def test_verify_handles_opencv_error(
         self,
@@ -1646,9 +1560,8 @@ class TestVerificationServiceIntegration:
         with patch.object(
             service, "_calculate_regions", side_effect=cv2.error("Test OpenCV error")
         ):
-            result = service.verify(image_bytes, image_bytes)
-            assert result.success is False
-            assert result.error == "Image processing error"
+            with pytest.raises(RuntimeError, match="Image processing error"):
+                service.verify(image_bytes, image_bytes)
 
     def test_verify_handles_tesseract_error(
         self,
@@ -1672,9 +1585,8 @@ class TestVerificationServiceIntegration:
             "_find_user_info",
             side_effect=pytesseract.TesseractError("Tesseract failed", 1),
         ):
-            result = service.verify(image_bytes, image_bytes)
-            assert result.success is False
-            assert result.error == "OCR processing error"
+            with pytest.raises(RuntimeError, match="OCR processing error"):
+                service.verify(image_bytes, image_bytes)
 
     def test_verify_handles_unexpected_exception(
         self,
@@ -1693,9 +1605,6 @@ class TestVerificationServiceIntegration:
 
         service = VerificationService(mock_settings)
 
-        with patch.object(
-            service, "_calculate_regions", side_effect=RuntimeError("Unexpected error")
-        ):
-            result = service.verify(image_bytes, image_bytes)
-            assert result.success is False
-            assert result.error == "Internal processing error"
+        with patch.object(service, "_calculate_regions", side_effect=Exception("Unexpected error")):
+            with pytest.raises(RuntimeError, match="Internal processing error"):
+                service.verify(image_bytes, image_bytes)

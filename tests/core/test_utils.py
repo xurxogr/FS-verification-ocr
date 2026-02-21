@@ -1,6 +1,7 @@
 """Tests for core utilities."""
 
 import logging
+import pathlib
 import subprocess
 from unittest.mock import MagicMock, patch
 
@@ -203,7 +204,7 @@ class TestSetupLogging:
         test_logger = logging.getLogger("test_logger")
         assert test_logger.level == logging.WARNING
 
-    def test_setup_logging_with_file(self, tmp_path) -> None:
+    def test_setup_logging_with_file(self, tmp_path: pathlib.Path) -> None:
         """
         Test setup_logging with log file.
 
@@ -243,7 +244,7 @@ class TestSetupLogging:
         ]
         assert len(health_filters) >= 1
 
-    def test_setup_logging_with_rotating_file(self, tmp_path) -> None:
+    def test_setup_logging_with_rotating_file(self, tmp_path: pathlib.Path) -> None:
         """
         Test setup_logging with rotating log file.
 

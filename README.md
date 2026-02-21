@@ -71,12 +71,6 @@ Environment variables (prefix `VOCR_`). Can be set in a `.env` file.
 | `VOCR_WAR__NUMBER` | Auto-fetched | Current war number |
 | `VOCR_WAR__START_TIME` | Auto-fetched | War start time (Unix ms) |
 
-### Verification Settings
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `VOCR_VERIFICATION__MAX_INGAME_TIME_DIFF` | `25` | Max allowed in-game time difference in days |
-
 ### Logging Settings
 
 | Variable | Default | Description |
@@ -90,11 +84,50 @@ Environment variables (prefix `VOCR_`). Can be set in a `.env` file.
 | `/` | GET | No | Web interface (if enabled) |
 | `/health` | GET | No | Health check |
 | `/war` | GET | No | Current war information |
-| `/verify` | POST | Yes* | Upload two images for verification |
-| `/sync` | POST | Yes* | Sync war data from Foxhole API |
+| `/foxhole/verify` | POST | Yes* | Upload two images for verification |
+| `/foxhole/sync` | POST | Yes* | Sync war data from Foxhole API |
 | `/docs` | GET | No | OpenAPI documentation |
 
 *Authentication required only if `VOCR_API_SERVER__API_KEY` is configured.
+
+### `/verify` Response
+
+Returns the verification data directly:
+
+```json
+{
+  "name": "PlayerName",
+  "level": 25,
+  "regiment": "[TAG] Regiment Name",
+  "faction": "colonial",
+  "shard": "ABLE",
+  "ingame_time": "267, 21:45",
+  "war_number": 132,
+  "current_ingame_time": "268, 14:30"
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | string \| null | Player name |
+| `level` | integer \| null | Player level |
+| `regiment` | string \| null | Regiment name (null if not in a regiment) |
+| `faction` | string \| null | `"colonial"` or `"wardens"` |
+| `shard` | string \| null | Game shard identifier |
+| `ingame_time` | string \| null | In-game time from screenshot (day, HH:MM) |
+| `war_number` | integer \| null | Current war number |
+| `current_ingame_time` | string \| null | Current in-game time (day, HH:MM) |
+
+### Status Codes
+
+| Code | Description |
+|------|-------------|
+| `200` | Success |
+| `401` | API key required or invalid |
+| `413` | Image exceeds maximum upload size |
+| `422` | Validation error (invalid images, no name found) |
+| `429` | Rate limit exceeded |
+| `500` | Internal processing error |
 
 ## Authentication
 

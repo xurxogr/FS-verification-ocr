@@ -11,7 +11,8 @@ from cv2.typing import MatLike
 
 from verification_ocr.core.settings import AppSettings
 from verification_ocr.core.utils import calculate_war_time
-from verification_ocr.models import ImageRegions, Region, Verification, VerificationResponse
+from verification_ocr.enums import Faction
+from verification_ocr.models import ImageRegions, Region, Verification
 from verification_ocr.services.war_service import get_war_service
 
 logger = logging.getLogger(__name__)
@@ -550,7 +551,11 @@ class VerificationService:
         # Check for colonial faction icon in icon region
         r = regions.icon
         icon_image = image[r.y1 : r.y2, r.x1 : r.x2]
-        data.colonial = self._find_colonial_icon(icon_image)
+        is_colonial = self._find_colonial_icon(icon_image)
+        if is_colonial is True:
+            data.faction = Faction.COLONIAL
+        elif is_colonial is False:
+            data.faction = Faction.WARDENS
 
         # Extract Regiment name from grey bar region
         r = regions.regiment
@@ -656,7 +661,7 @@ class VerificationService:
 
         return shard, ingame_time
 
-    def verify(self, image1_bytes: bytes, image2_bytes: bytes) -> VerificationResponse:
+    def verify(self, image1_bytes: bytes, image2_bytes: bytes) -> Verification:
         """
         Process two images and extract user verification information.
 
@@ -665,7 +670,11 @@ class VerificationService:
             image2_bytes (bytes): Second image bytes.
 
         Returns:
-            VerificationResponse: Verification result with user info or error.
+            Verification: Extracted verification data.
+
+        Raises:
+            ValueError: If images cannot be decoded or are invalid.
+            RuntimeError: If image processing fails.
         """
         logger.info("Processing image pair for verification")
 
@@ -679,10 +688,7 @@ class VerificationService:
 
             # Check if images were decoded successfully
             if images[0] is None or images[1] is None:
-                return VerificationResponse(
-                    success=False,
-                    error="Failed to decode one or both images",
-                )
+                raise ValueError("Failed to decode one or both images")
 
             # Extract decoded images (now guaranteed to be non-None)
             img1: MatLike = images[0]
@@ -691,10 +697,7 @@ class VerificationService:
             # Validate minimum image dimensions
             for i, img in enumerate([img1, img2]):
                 if img.shape[0] < 100 or img.shape[1] < 100:
-                    return VerificationResponse(
-                        success=False,
-                        error=f"Image {i + 1} is too small (minimum 100x100 pixels)",
-                    )
+                    raise ValueError(f"Image {i + 1} is too small (minimum 100x100 pixels)")
 
             # Calculate regions for both images
             regions1 = self._calculate_regions(img1)
@@ -731,57 +734,30 @@ class VerificationService:
             verification.ingame_time = ingame_time
 
             if verification.name is None:
-                return VerificationResponse(
-                    success=False,
-                    error="No name found in any of the images",
+                raise ValueError("No name found in any of the images")
+
+            # Add war state info
+            war_service = get_war_service()
+            verification.war_number = war_service.state.war_number
+
+            # Add current in-game time
+            current_time = get_current_ingame_time()
+            if current_time is not None:
+                current_day, current_hour, current_minute = current_time
+                verification.current_ingame_time = (
+                    f"{current_day}, {current_hour:02d}:{current_minute:02d}"
                 )
 
-            # Validate in-game time difference
-            if ingame_time is not None:
-                parsed_time = parse_ingame_time(ingame_time=ingame_time)
-                current_time = get_current_ingame_time()
-
-                if parsed_time is not None and current_time is not None:
-                    time_diff = calculate_ingame_time_diff(
-                        extracted_day=parsed_time[0],
-                        extracted_hour=parsed_time[1],
-                        current_day=current_time[0],
-                        current_hour=current_time[1],
-                    )
-
-                    max_diff_days = self.settings.verification.max_ingame_time_diff
-                    max_diff_hours = max_diff_days * 24
-                    if time_diff > max_diff_hours:
-                        time_diff_days = time_diff / 24
-                        return VerificationResponse(
-                            success=False,
-                            error=(
-                                f"In-game time difference is {time_diff_days:.1f} days "
-                                f"(max allowed: {max_diff_days})"
-                            ),
-                            verification=verification,
-                        )
-
-            return VerificationResponse(
-                success=True,
-                verification=verification,
-            )
+            return verification
 
         except cv2.error as e:
             logger.error(f"OpenCV error during verification: {e}")
-            return VerificationResponse(
-                success=False,
-                error="Image processing error",
-            )
+            raise RuntimeError("Image processing error") from e
         except pytesseract.TesseractError as e:
             logger.error(f"Tesseract OCR error: {e}")
-            return VerificationResponse(
-                success=False,
-                error="OCR processing error",
-            )
+            raise RuntimeError("OCR processing error") from e
+        except ValueError:
+            raise
         except Exception as e:
             logger.exception(f"Unexpected error during verification: {e}")
-            return VerificationResponse(
-                success=False,
-                error="Internal processing error",
-            )
+            raise RuntimeError("Internal processing error") from e

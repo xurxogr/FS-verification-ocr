@@ -1,5 +1,6 @@
 """Tests for verification model."""
 
+from verification_ocr.enums import Faction
 from verification_ocr.models.verification import Verification
 
 
@@ -15,9 +16,11 @@ class TestVerification:
         assert verification.name is None
         assert verification.level is None
         assert verification.regiment is None
-        assert verification.colonial is None
+        assert verification.faction is None
         assert verification.shard is None
         assert verification.ingame_time is None
+        assert verification.war_number is None
+        assert verification.current_ingame_time is None
 
     def test_create_verification_with_values(self) -> None:
         """
@@ -28,14 +31,18 @@ class TestVerification:
             name="TestPlayer",
             level=25,
             regiment="[TAG] Test Regiment",
-            colonial=False,
+            faction=Faction.WARDENS,
             shard="ABLE",
+            war_number=132,
+            current_ingame_time="268, 14:30",
         )
         assert verification.name == "TestPlayer"
         assert verification.level == 25
         assert verification.regiment == "[TAG] Test Regiment"
-        assert verification.colonial is False
+        assert verification.faction == Faction.WARDENS
         assert verification.shard == "ABLE"
+        assert verification.war_number == 132
+        assert verification.current_ingame_time == "268, 14:30"
 
     def test_verification_to_dict(self) -> None:
         """
@@ -58,8 +65,8 @@ class TestVerification:
         """
         verification = Verification(
             name="PartialPlayer",
-            colonial=True,
+            faction=Faction.COLONIAL,
         )
         assert verification.name == "PartialPlayer"
         assert verification.level is None
-        assert verification.colonial is True
+        assert verification.faction == Faction.COLONIAL

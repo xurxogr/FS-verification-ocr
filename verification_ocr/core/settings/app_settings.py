@@ -27,15 +27,6 @@ class APIServerSettings(BaseModel):
     )
 
 
-class VerificationSettings(BaseModel):
-    """Verification configuration."""
-
-    max_ingame_time_diff: int = Field(
-        default=25,
-        description="Maximum allowed in-game time difference in days",
-    )
-
-
 class OCRSettings(BaseModel):
     """OCR processing configuration."""
 
@@ -138,4 +129,3 @@ class AppSettings(BaseSettings):
     ocr: OCRSettings = Field(default_factory=OCRSettings)
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
     war: WarSettings = Field(default_factory=WarSettings)
-    verification: VerificationSettings = Field(default_factory=VerificationSettings)

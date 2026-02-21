@@ -19,7 +19,7 @@ from verification_ocr import __version__
 from verification_ocr.api.dependencies import get_verification_service, verify_api_key
 from verification_ocr.core.settings import get_settings
 from verification_ocr.core.utils import calculate_war_time, get_tesseract_version, setup_logging
-from verification_ocr.models import HealthResponse, VerificationResponse, WarResponse
+from verification_ocr.models import HealthResponse, Verification, WarResponse
 from verification_ocr.services import VerificationService, get_war_service
 
 logger = logging.getLogger(__name__)
@@ -220,7 +220,7 @@ async def get_war_info() -> WarResponse:
     )
 
 
-@app.post("/sync")
+@app.post("/foxhole/sync")
 async def sync_war(
     _api_key: Annotated[str | None, Depends(verify_api_key)],
 ) -> dict[str, Any]:
@@ -253,7 +253,7 @@ async def sync_war(
     }
 
 
-@app.post("/verify", response_model=VerificationResponse)
+@app.post("/foxhole/verify", response_model=Verification)
 @limiter.limit(lambda: get_settings().api_server.rate_limit)
 async def verify_images(
     request: Request,
@@ -261,7 +261,7 @@ async def verify_images(
     image2: Annotated[UploadFile, File(description="Second image")],
     service: Annotated[VerificationService, Depends(get_verification_service)],
     _api_key: Annotated[str | None, Depends(verify_api_key)],
-) -> VerificationResponse:
+) -> Verification:
     """
     Verify user from two game screenshots.
 
@@ -276,7 +276,8 @@ async def verify_images(
         image2 (UploadFile): Second screenshot (profile or map).
         service (VerificationService): Injected verification service.
 
-        VerificationResponse: Verification result with user info or error.
+    Returns:
+        Verification: Extracted verification data.
     """
     settings = get_settings()
     max_size = settings.api_server.max_upload_size
@@ -296,8 +297,13 @@ async def verify_images(
             detail=f"Image 2 exceeds maximum size of {max_size // (1024 * 1024)}MB",
         )
 
-    # Process and compare
-    return service.verify(
-        image1_bytes=image1_bytes,
-        image2_bytes=image2_bytes,
-    )
+    # Process and extract verification data
+    try:
+        return service.verify(
+            image1_bytes=image1_bytes,
+            image2_bytes=image2_bytes,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))

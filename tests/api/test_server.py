@@ -1,6 +1,8 @@
 """Tests for API server."""
 
 import io
+import pathlib
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import cv2
@@ -142,7 +144,7 @@ class TestCreateApp:
             app_instance = create_app()
             assert isinstance(app_instance, FastAPI)
             # Static route should not be mounted
-            routes = [route.path for route in app_instance.routes]
+            routes = [getattr(route, "path", None) for route in app_instance.routes]
             assert "/static" not in routes
 
 
@@ -267,36 +269,36 @@ class TestWarEndpoint:
 
 
 class TestSyncEndpoint:
-    """Tests for /sync endpoint."""
+    """Tests for /foxhole/sync endpoint."""
 
     def test_sync_returns_200(self, test_client: TestClient) -> None:
-        """Test that /sync returns 200 status code."""
+        """Test that /foxhole/sync returns 200 status code."""
         war_service = get_war_service()
         with patch.object(war_service, "sync_from_api", new_callable=AsyncMock) as mock_sync:
             mock_sync.return_value = True
-            response = test_client.post("/sync")
+            response = test_client.post("/foxhole/sync")
             assert response.status_code == 200
 
     def test_sync_returns_success_true_on_success(self, test_client: TestClient) -> None:
-        """Test that /sync returns success true when API call succeeds."""
+        """Test that /foxhole/sync returns success true when API call succeeds."""
         war_service = get_war_service()
         with patch.object(war_service, "sync_from_api", new_callable=AsyncMock) as mock_sync:
             mock_sync.return_value = True
-            response = test_client.post("/sync")
+            response = test_client.post("/foxhole/sync")
             data = response.json()
             assert data["success"] is True
 
     def test_sync_returns_success_false_on_failure(self, test_client: TestClient) -> None:
-        """Test that /sync returns success false when API call fails."""
+        """Test that /foxhole/sync returns success false when API call fails."""
         war_service = get_war_service()
         with patch.object(war_service, "sync_from_api", new_callable=AsyncMock) as mock_sync:
             mock_sync.return_value = False
-            response = test_client.post("/sync")
+            response = test_client.post("/foxhole/sync")
             data = response.json()
             assert data["success"] is False
 
     def test_sync_returns_war_state(self, test_client: TestClient) -> None:
-        """Test that /sync returns current war state with calculated time."""
+        """Test that /foxhole/sync returns current war state with calculated time."""
         import time
 
         war_service = get_war_service()
@@ -312,7 +314,7 @@ class TestSyncEndpoint:
         try:
             with patch.object(war_service, "sync_from_api", new_callable=AsyncMock) as mock_sync:
                 mock_sync.return_value = True
-                response = test_client.post("/sync")
+                response = test_client.post("/foxhole/sync")
                 data = response.json()
                 assert data["war_number"] == 132
                 assert data["start_time"] is not None
@@ -346,7 +348,7 @@ class TestIndexEndpoint:
 
 
 class TestVerifyEndpoint:
-    """Tests for /verify endpoint."""
+    """Tests for /foxhole/verify endpoint."""
 
     def _create_test_image(self, width: int = 3840, height: int = 2160) -> bytes:
         """Create a test image of specified size."""
@@ -360,7 +362,7 @@ class TestVerifyEndpoint:
 
         call_count = [0]
 
-        def mock_ocr(*args, **kwargs) -> str:
+        def mock_ocr(*args: Any, **kwargs: Any) -> str:
             call_count[0] += 1
             if call_count[0] == 1:
                 return "TestUser"  # username
@@ -375,7 +377,7 @@ class TestVerifyEndpoint:
             side_effect=mock_ocr,
         ):
             response = test_client.post(
-                "/verify",
+                "/foxhole/verify",
                 files={
                     "image1": ("test1.png", io.BytesIO(image_bytes), "image/png"),
                     "image2": ("test2.png", io.BytesIO(image_bytes), "image/png"),
@@ -384,14 +386,14 @@ class TestVerifyEndpoint:
 
             assert response.status_code == 200
             data = response.json()
-            assert data["success"] is True
-            assert data["verification"]["name"] == "TestUser"
+            assert data["name"] == "TestUser"
+            assert data["level"] == 15
 
     def test_verify_missing_image1(self, test_client: TestClient) -> None:
         """Test verify endpoint with missing image1."""
         image_bytes = self._create_test_image()
         response = test_client.post(
-            "/verify",
+            "/foxhole/verify",
             files={
                 "image2": ("test2.png", io.BytesIO(image_bytes), "image/png"),
             },
@@ -403,7 +405,7 @@ class TestVerifyEndpoint:
         """Test verify endpoint with missing image2."""
         image_bytes = self._create_test_image()
         response = test_client.post(
-            "/verify",
+            "/foxhole/verify",
             files={
                 "image1": ("test1.png", io.BytesIO(image_bytes), "image/png"),
             },
@@ -412,7 +414,7 @@ class TestVerifyEndpoint:
         assert response.status_code == 422
 
     def test_verify_returns_error_when_no_name_found(self, test_client: TestClient) -> None:
-        """Test that verify returns error when no name found."""
+        """Test that verify returns 422 error when no name found."""
         image_bytes = self._create_test_image()
 
         with patch(
@@ -420,16 +422,36 @@ class TestVerifyEndpoint:
             return_value="",
         ):
             response = test_client.post(
-                "/verify",
+                "/foxhole/verify",
                 files={
                     "image1": ("test1.png", io.BytesIO(image_bytes), "image/png"),
                     "image2": ("test2.png", io.BytesIO(image_bytes), "image/png"),
                 },
             )
 
+            assert response.status_code == 422
             data = response.json()
-            assert data["success"] is False
-            assert "No name found" in data["error"]
+            assert "No name found" in data["detail"]
+
+    def test_verify_returns_500_on_runtime_error(self, test_client: TestClient) -> None:
+        """Test that verify returns 500 error on RuntimeError."""
+        image_bytes = self._create_test_image()
+
+        with patch(
+            "verification_ocr.services.verification_service.VerificationService.verify",
+            side_effect=RuntimeError("Processing failed"),
+        ):
+            response = test_client.post(
+                "/foxhole/verify",
+                files={
+                    "image1": ("test1.png", io.BytesIO(image_bytes), "image/png"),
+                    "image2": ("test2.png", io.BytesIO(image_bytes), "image/png"),
+                },
+            )
+
+            assert response.status_code == 500
+            data = response.json()
+            assert "Processing failed" in data["detail"]
 
 
 class TestAppInstance:
@@ -441,28 +463,28 @@ class TestAppInstance:
 
     def test_app_has_health_route(self) -> None:
         """Test that app has /health route."""
-        routes = [route.path for route in app.routes]
+        routes = [getattr(route, "path", None) for route in app.routes]
         assert "/health" in routes
 
     def test_app_has_verify_route(self) -> None:
-        """Test that app has /verify route."""
-        routes = [route.path for route in app.routes]
-        assert "/verify" in routes
+        """Test that app has /foxhole/verify route."""
+        routes = [getattr(route, "path", None) for route in app.routes]
+        assert "/foxhole/verify" in routes
 
     def test_app_has_index_route(self) -> None:
         """Test that app has / route."""
-        routes = [route.path for route in app.routes]
+        routes = [getattr(route, "path", None) for route in app.routes]
         assert "/" in routes
 
     def test_app_has_war_route(self) -> None:
         """Test that app has /war route."""
-        routes = [route.path for route in app.routes]
+        routes = [getattr(route, "path", None) for route in app.routes]
         assert "/war" in routes
 
     def test_app_has_sync_route(self) -> None:
-        """Test that app has /sync route."""
-        routes = [route.path for route in app.routes]
-        assert "/sync" in routes
+        """Test that app has /foxhole/sync route."""
+        routes = [getattr(route, "path", None) for route in app.routes]
+        assert "/foxhole/sync" in routes
 
 
 class TestSecurityHeaders:
@@ -531,7 +553,7 @@ class TestUploadSizeLimits:
         small_bytes = buffer.tobytes()
 
         response = test_client.post(
-            "/verify",
+            "/foxhole/verify",
             files={
                 "image1": ("large.png", io.BytesIO(large_data), "image/png"),
                 "image2": ("small.png", io.BytesIO(small_bytes), "image/png"),
@@ -551,7 +573,7 @@ class TestUploadSizeLimits:
         small_bytes = buffer.tobytes()
 
         response = test_client.post(
-            "/verify",
+            "/foxhole/verify",
             files={
                 "image1": ("small.png", io.BytesIO(small_bytes), "image/png"),
                 "image2": ("large.png", io.BytesIO(large_data), "image/png"),
@@ -614,7 +636,7 @@ class TestApiKeyAuthentication:
             war_service = get_war_service()
             with patch.object(war_service, "sync_from_api", new_callable=AsyncMock) as mock_sync:
                 mock_sync.return_value = True
-                response = test_client.post("/sync")
+                response = test_client.post("/foxhole/sync")
                 assert response.status_code == 200
 
     def test_verify_api_key_required_but_missing(self, test_client: TestClient) -> None:
@@ -624,7 +646,7 @@ class TestApiKeyAuthentication:
         settings = get_settings()
         # Enable API key requirement
         with patch.object(settings.api_server, "api_key", "test-secret-key"):
-            response = test_client.post("/sync")
+            response = test_client.post("/foxhole/sync")
             assert response.status_code == 401
             assert response.json()["detail"] == "API key required"
 
@@ -636,7 +658,7 @@ class TestApiKeyAuthentication:
         # Enable API key requirement
         with patch.object(settings.api_server, "api_key", "test-secret-key"):
             response = test_client.post(
-                "/sync",
+                "/foxhole/sync",
                 headers={"X-API-Key": "wrong-key"},
             )
             assert response.status_code == 401
@@ -653,13 +675,13 @@ class TestApiKeyAuthentication:
             with patch.object(war_service, "sync_from_api", new_callable=AsyncMock) as mock_sync:
                 mock_sync.return_value = True
                 response = test_client.post(
-                    "/sync",
+                    "/foxhole/sync",
                     headers={"X-API-Key": "test-secret-key"},
                 )
                 assert response.status_code == 200
 
     def test_verify_endpoint_requires_api_key(self, test_client: TestClient) -> None:
-        """Test that /verify endpoint requires API key when enabled."""
+        """Test that /foxhole/verify endpoint requires API key when enabled."""
         from verification_ocr.core.settings import get_settings
 
         settings = get_settings()
@@ -668,7 +690,7 @@ class TestApiKeyAuthentication:
         # Enable API key requirement
         with patch.object(settings.api_server, "api_key", "test-secret-key"):
             response = test_client.post(
-                "/verify",
+                "/foxhole/verify",
                 files={
                     "image1": ("test1.png", io.BytesIO(image_bytes), "image/png"),
                     "image2": ("test2.png", io.BytesIO(image_bytes), "image/png"),
@@ -678,7 +700,7 @@ class TestApiKeyAuthentication:
             assert response.json()["detail"] == "API key required"
 
     def test_verify_endpoint_with_valid_api_key(self, test_client: TestClient) -> None:
-        """Test that /verify endpoint works with valid API key."""
+        """Test that /foxhole/verify endpoint works with valid API key."""
         from verification_ocr.core.settings import get_settings
 
         settings = get_settings()
@@ -691,7 +713,7 @@ class TestApiKeyAuthentication:
                 return_value="TestUser",
             ):
                 response = test_client.post(
-                    "/verify",
+                    "/foxhole/verify",
                     files={
                         "image1": ("test1.png", io.BytesIO(image_bytes), "image/png"),
                         "image2": ("test2.png", io.BytesIO(image_bytes), "image/png"),
@@ -715,7 +737,7 @@ class TestFrontendServing:
         with patch.object(settings.api_server, "serve_frontend", False):
             with patch("verification_ocr.api.server.os.path.exists", return_value=True):
                 app_instance = create_app()
-                routes = [route.path for route in app_instance.routes]
+                routes = [getattr(route, "path", None) for route in app_instance.routes]
                 assert "/static" not in routes
 
     def test_static_files_mounted_when_frontend_enabled(
@@ -729,7 +751,7 @@ class TestFrontendServing:
         with patch.object(settings.api_server, "serve_frontend", True):
             with patch("verification_ocr.api.server.os.path.exists", return_value=True):
                 app_instance = create_app()
-                routes = [route.path for route in app_instance.routes]
+                routes = [getattr(route, "path", None) for route in app_instance.routes]
                 assert "/static" in routes
 
     def test_index_returns_json_when_frontend_disabled(
@@ -754,7 +776,7 @@ class TestIndexEndpointSecurity:
     def test_index_returns_file_when_exists(
         self,
         test_client: TestClient,
-        tmp_path,
+        tmp_path: pathlib.Path,
     ) -> None:
         """Test that index returns FileResponse when index.html exists."""
         from verification_ocr.core.settings import get_settings
@@ -779,7 +801,7 @@ class TestIndexEndpointSecurity:
         settings = get_settings()
 
         # Mock realpath to simulate path resolving outside STATIC_DIR
-        def mock_realpath(path):
+        def mock_realpath(path: Any) -> str:
             if "index.html" in str(path):
                 return "/etc/passwd"
             return "/safe/static"

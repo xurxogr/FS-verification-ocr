@@ -2,8 +2,6 @@
 
 from verification_ocr.models import (
     HealthResponse,
-    Verification,
-    VerificationResponse,
     WarResponse,
 )
 
@@ -58,79 +56,6 @@ class TestHealthResponse:
         data = response.model_dump()
         assert data["status"] == "healthy"
         assert data["version"] == "1.0.0"
-
-
-class TestVerificationResponse:
-    """Tests for VerificationResponse model."""
-
-    def test_create_verification_response_success(self) -> None:
-        """
-        Test creating a successful VerificationResponse.
-
-        """
-        response = VerificationResponse(
-            success=True,
-            verification=Verification(name="TestUser", level=10),
-        )
-        assert response.success is True
-        assert response.error is None
-        assert response.verification.name == "TestUser"
-
-    def test_verification_response_default_values(self) -> None:
-        """
-        Test VerificationResponse default values.
-
-        """
-        response = VerificationResponse(success=True)
-        assert response.error is None
-        assert response.verification is None
-
-    def test_verification_response_failure(self) -> None:
-        """
-        Test VerificationResponse for failure case.
-
-        """
-        response = VerificationResponse(
-            success=False,
-            error="No name found in any of the images",
-        )
-        assert response.success is False
-        assert response.error == "No name found in any of the images"
-        assert response.verification is None
-
-    def test_verification_response_to_dict(self) -> None:
-        """
-        Test VerificationResponse model_dump.
-
-        """
-        response = VerificationResponse(
-            success=True,
-            verification=Verification(name="Player1"),
-        )
-        data = response.model_dump()
-        assert data["success"] is True
-        assert data["verification"]["name"] == "Player1"
-
-    def test_verification_response_with_full_verification(self) -> None:
-        """
-        Test VerificationResponse with full verification data.
-
-        """
-        response = VerificationResponse(
-            success=True,
-            verification=Verification(
-                name="TestPlayer",
-                level=25,
-                regiment="[TAG] My Regiment",
-                colonial=False,
-                shard="ABLE",
-            ),
-        )
-        assert response.verification.name == "TestPlayer"
-        assert response.verification.level == 25
-        assert response.verification.regiment == "[TAG] My Regiment"
-        assert response.verification.colonial is False
-        assert response.verification.shard == "ABLE"
 
 
 class TestWarResponse:
