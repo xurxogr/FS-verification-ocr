@@ -2,7 +2,6 @@
 
 import logging
 import os
-import time
 from contextlib import asynccontextmanager
 from typing import Annotated, Any
 
@@ -14,37 +13,13 @@ from fastapi.staticfiles import StaticFiles
 from verification_ocr import __version__
 from verification_ocr.api.dependencies import get_verification_service
 from verification_ocr.core.settings import get_settings
-from verification_ocr.core.utils import get_tesseract_version, setup_logging
+from verification_ocr.core.utils import calculate_war_time, get_tesseract_version, setup_logging
 from verification_ocr.models import HealthResponse, VerificationResponse, WarResponse
 from verification_ocr.services import VerificationService, get_war_service
 
 logger = logging.getLogger(__name__)
 
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "static")
-
-
-def calculate_war_time(start_time: int) -> tuple[int, int, int]:
-    """
-    Calculate war day, hour, and minute from start time.
-
-    Args:
-        start_time (int): War start time in milliseconds.
-
-        tuple[int, int, int]: (war_day, war_hour, war_minute)
-    """
-    current_time_ms = int(time.time() * 1000)
-    elapsed_ms = current_time_ms - start_time
-    elapsed_hours = elapsed_ms / (1000 * 60 * 60)
-
-    # 1 real hour = 1 in-game day (game starts at Day 1, not Day 0)
-    war_day = int(elapsed_hours) + 1
-
-    # Convert fractional hour to in-game time (24h format)
-    fraction = elapsed_hours % 1
-    war_hour = int(fraction * 24)
-    war_minute = int((fraction * 24 % 1) * 60)
-
-    return war_day, war_hour, war_minute
 
 
 @asynccontextmanager

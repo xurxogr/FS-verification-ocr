@@ -4,12 +4,39 @@ import logging
 import shutil
 import subprocess
 import sys
+import time
 from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 
 from verification_ocr.core.settings.app_settings import LoggingSettings
 
 logger = logging.getLogger(__name__)
+
+
+def calculate_war_time(start_time: int) -> tuple[int, int, int]:
+    """
+    Calculate war day, hour, and minute from start time.
+
+    Args:
+        start_time (int): War start time in milliseconds.
+
+    Returns:
+        tuple[int, int, int]: (war_day, war_hour, war_minute)
+    """
+    current_time_ms = int(time.time() * 1000)
+    elapsed_ms = current_time_ms - start_time
+    elapsed_hours = elapsed_ms / (1000 * 60 * 60)
+
+    # 1 real hour = 1 in-game day (game starts at Day 1, not Day 0)
+    war_day = int(elapsed_hours) + 1
+
+    # Convert fractional hour to in-game time (24h format)
+    fraction = elapsed_hours % 1
+    war_hour = int(fraction * 24)
+    war_minute = int((fraction * 24 % 1) * 60)
+
+    return war_day, war_hour, war_minute
+
 
 # Handler names used to identify handlers and avoid duplicates
 APP_STREAM_HANDLER_NAME = "vocr_app_stream_handler"

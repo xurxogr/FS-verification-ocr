@@ -3,7 +3,6 @@
 import logging
 import os
 import re
-import time
 
 import cv2
 import numpy as np
@@ -11,6 +10,7 @@ import pytesseract
 from cv2.typing import MatLike
 
 from verification_ocr.core.settings import AppSettings
+from verification_ocr.core.utils import calculate_war_time
 from verification_ocr.models import ImageRegions, Region, Verification, VerificationResponse
 from verification_ocr.services.war_service import get_war_service
 
@@ -111,17 +111,7 @@ def get_current_ingame_time() -> tuple[int, int, int] | None:
     if war_service.state.start_time is None:
         return None
 
-    current_time_ms = int(time.time() * 1000)
-    elapsed_ms = current_time_ms - war_service.state.start_time
-    elapsed_hours = elapsed_ms / (1000 * 60 * 60)
-
-    # 1 real hour = 1 in-game day (game starts at Day 1)
-    war_day = int(elapsed_hours) + 1
-    fraction = elapsed_hours % 1
-    war_hour = int(fraction * 24)
-    war_minute = int((fraction * 24 % 1) * 60)
-
-    return war_day, war_hour, war_minute
+    return calculate_war_time(start_time=war_service.state.start_time)
 
 
 class VerificationService:
@@ -150,6 +140,15 @@ class VerificationService:
         # Create debug output directory if debug mode is enabled
         if settings.ocr.debug_mode:
             os.makedirs(settings.ocr.debug_output_dir, exist_ok=True)
+
+        # Cache CLAHE object for image enhancement
+        self.clahe = cv2.createCLAHE(
+            clipLimit=settings.ocr.clahe_clip_limit,
+            tileGridSize=(
+                settings.ocr.clahe_grid_size,
+                settings.ocr.clahe_grid_size,
+            ),
+        )
 
     def _extract_text_from_image(
         self,
@@ -186,15 +185,8 @@ class VerificationService:
         # Convert to grayscale
         gray = cv2.cvtColor(src=resized, code=cv2.COLOR_BGR2GRAY)
 
-        # Enhance contrast using CLAHE
-        clahe = cv2.createCLAHE(
-            clipLimit=self.settings.ocr.clahe_clip_limit,
-            tileGridSize=(
-                self.settings.ocr.clahe_grid_size,
-                self.settings.ocr.clahe_grid_size,
-            ),
-        )
-        enhanced = clahe.apply(gray)
+        # Enhance contrast using cached CLAHE
+        enhanced = self.clahe.apply(gray)
 
         if use_invert:
             processed = cv2.bitwise_not(enhanced)
@@ -250,71 +242,6 @@ class VerificationService:
         # For shard: use THRESH_BINARY (not inverted) and reduce threshold
         threshold_mode = cv2.THRESH_BINARY
         threshold_value -= 30
-
-        # Zero out pixels below threshold
-        upscaled[upscaled < threshold_value] = 0
-
-        # Apply binary threshold
-        _, binary = cv2.threshold(
-            src=upscaled,
-            thresh=TESSERACT_BINARY_THRESHOLD,
-            maxval=255,
-            type=threshold_mode,
-        )
-
-        # Dilate to connect text components
-        kernel = cv2.getStructuringElement(shape=cv2.MORPH_RECT, ksize=(3, 3))
-        binary = cv2.dilate(src=binary, kernel=kernel, iterations=1)
-
-        # Convert back to RGB for tesseract
-        result = cv2.cvtColor(src=binary, code=cv2.COLOR_GRAY2RGB)
-
-        return np.asarray(a=result, dtype=np.uint8)
-
-    def _prepare_image_for_text_detection(
-        self,
-        image: cv2.typing.MatLike,
-        scale_factor: float,
-        use_inv: bool = True,
-    ) -> cv2.typing.MatLike:
-        """Apply preprocessing to image for text detection (stockpile name style).
-
-        Uses foxhole_stockpiles preprocessing technique for grey background regions.
-
-        Args:
-            image (cv2.typing.MatLike): Image region to preprocess.
-            scale_factor (float): Resolution scale factor.
-            use_inv (bool): Whether to use inverted thresholding.
-
-        Returns:
-            cv2.typing.MatLike: Processed image ready for OCR.
-        """
-        if image is None or image.size == 0:
-            return image
-
-        # Convert to grayscale
-        gray = cv2.cvtColor(src=image, code=cv2.COLOR_BGR2GRAY)
-
-        # Upscale based on scale factor
-        upscale_factor = 2 / scale_factor
-        upscaled = cv2.resize(
-            src=gray,
-            dsize=None,
-            fx=upscale_factor,
-            fy=upscale_factor,
-            interpolation=cv2.INTER_CUBIC,
-        )
-
-        # Calculate threshold from this region's pixel distribution
-        unique_values, counts = np.unique(upscaled, return_counts=True)
-        most_common_value = unique_values[np.argmax(counts)]
-        threshold_value = most_common_value + 120 * (1 - most_common_value / 255)
-
-        if use_inv:
-            threshold_mode = cv2.THRESH_BINARY_INV
-        else:
-            threshold_mode = cv2.THRESH_BINARY
-            threshold_value -= 30
 
         # Zero out pixels below threshold
         upscaled[upscaled < threshold_value] = 0
