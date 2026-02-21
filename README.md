@@ -66,6 +66,12 @@ Environment variables (prefix `VOCR_`). Can be set in a `.env` file.
 | `VOCR_WAR__NUMBER` | Auto-fetched | Current war number |
 | `VOCR_WAR__START_TIME` | Auto-fetched | War start time (Unix ms) |
 
+### Verification Settings
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `VOCR_VERIFICATION__MAX_INGAME_TIME_DIFF` | `25` | Max allowed in-game time difference in days |
+
 ### Logging Settings
 
 | Variable | Default | Description |

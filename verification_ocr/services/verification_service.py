@@ -745,13 +745,15 @@ class VerificationService:
                         current_hour=current_time[1],
                     )
 
-                    max_diff = self.settings.verification.max_ingame_time_diff
-                    if time_diff > max_diff:
+                    max_diff_days = self.settings.verification.max_ingame_time_diff
+                    max_diff_hours = max_diff_days * 24
+                    if time_diff > max_diff_hours:
+                        time_diff_days = time_diff / 24
                         return VerificationResponse(
                             success=False,
                             error=(
-                                f"In-game time difference is {time_diff} hours "
-                                f"(max allowed: {max_diff})"
+                                f"In-game time difference is {time_diff_days:.1f} days "
+                                f"(max allowed: {max_diff_days})"
                             ),
                             verification=verification,
                         )

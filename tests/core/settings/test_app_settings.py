@@ -72,7 +72,7 @@ class TestVerificationSettings:
 
     def test_default_max_ingame_time_diff(self) -> None:
         """
-        Test default max_ingame_time_diff.
+        Test default max_ingame_time_diff in days.
 
         """
         settings = VerificationSettings()
@@ -80,11 +80,11 @@ class TestVerificationSettings:
 
     def test_custom_max_ingame_time_diff(self) -> None:
         """
-        Test custom max_ingame_time_diff.
+        Test custom max_ingame_time_diff in days.
 
         """
-        settings = VerificationSettings(max_ingame_time_diff=60)
-        assert settings.max_ingame_time_diff == 60
+        settings = VerificationSettings(max_ingame_time_diff=5)
+        assert settings.max_ingame_time_diff == 5
 
 
 class TestOCRSettings:

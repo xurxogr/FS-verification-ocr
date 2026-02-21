@@ -32,7 +32,7 @@ class VerificationSettings(BaseModel):
 
     max_ingame_time_diff: int = Field(
         default=25,
-        description="Maximum allowed in-game time difference in hours",
+        description="Maximum allowed in-game time difference in days",
     )
 
 

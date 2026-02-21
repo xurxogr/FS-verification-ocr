@@ -1271,8 +1271,8 @@ class TestVerificationServiceVerify:
             start_time=int((time.time() - 100 * 60 * 60) * 1000)
         )  # 100 hours ago
 
-        # Set strict max time diff
-        mock_settings.verification = VerificationSettings(max_ingame_time_diff=10)
+        # Set strict max time diff (1 day = 24 hours)
+        mock_settings.verification = VerificationSettings(max_ingame_time_diff=1)
 
         img = np.ones((2160, 3840, 3), dtype=np.uint8) * 255
         _, buffer = cv2.imencode(".png", img)
@@ -1442,8 +1442,8 @@ class TestVerificationServiceVerify:
         war_service = get_war_service()
         war_service.initialize(start_time=int((time.time() - 100 * 60 * 60) * 1000))
 
-        # Set max time diff to 50 hours (plenty of room)
-        mock_settings.verification = VerificationSettings(max_ingame_time_diff=50)
+        # Set max time diff to 3 days (plenty of room)
+        mock_settings.verification = VerificationSettings(max_ingame_time_diff=3)
 
         img = np.ones((2160, 3840, 3), dtype=np.uint8) * 255
         _, buffer = cv2.imencode(".png", img)

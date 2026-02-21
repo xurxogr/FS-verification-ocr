@@ -42,7 +42,7 @@ def mock_settings() -> AppSettings:
             log_format="%(message)s",
         ),
         verification=VerificationSettings(
-            max_ingame_time_diff=999999,  # High value for unit tests
+            max_ingame_time_diff=999999,  # High value in days for unit tests
         ),
     )
 
