@@ -2,6 +2,7 @@
 
 import io
 import pathlib
+import time
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -10,6 +11,7 @@ import numpy as np
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from slowapi.errors import RateLimitExceeded
 
 from verification_ocr import __version__
 from verification_ocr.api.server import (
@@ -18,6 +20,8 @@ from verification_ocr.api.server import (
     lifespan,
     rate_limit_exceeded_handler,
 )
+from verification_ocr.core.settings import get_settings
+from verification_ocr.enums import Faction
 from verification_ocr.services import get_war_service
 
 
@@ -52,8 +56,6 @@ class TestLifespan:
         mock_tesseract_available: MagicMock,
     ) -> None:
         """Test lifespan skips API fetch when war state is already configured."""
-        from verification_ocr.core.settings import get_settings
-
         war_service = get_war_service()
         mock_app = MagicMock(spec=FastAPI)
 
@@ -74,8 +76,6 @@ class TestLifespan:
         mock_tesseract_available: MagicMock,
     ) -> None:
         """Test lifespan fetches war data from API when not configured."""
-        from verification_ocr.core.settings import get_settings
-
         war_service = get_war_service()
 
         mock_app = MagicMock(spec=FastAPI)
@@ -98,8 +98,6 @@ class TestLifespan:
         mock_tesseract_available: MagicMock,
     ) -> None:
         """Test lifespan logs warning when war state cannot be configured."""
-        from verification_ocr.core.settings import get_settings
-
         war_service = get_war_service()
 
         mock_app = MagicMock(spec=FastAPI)
@@ -223,8 +221,6 @@ class TestWarEndpoint:
 
     def test_war_day_calculation(self, test_client: TestClient) -> None:
         """Test that war_day is calculated correctly."""
-        import time
-
         war_service = get_war_service()
         original_number = war_service.state.war_number
         original_time = war_service.state.start_time
@@ -245,8 +241,6 @@ class TestWarEndpoint:
 
     def test_war_time_calculation(self, test_client: TestClient) -> None:
         """Test that war_hour and war_minute are calculated correctly."""
-        import time
-
         war_service = get_war_service()
         original_number = war_service.state.war_number
         original_time = war_service.state.start_time
@@ -299,8 +293,6 @@ class TestSyncEndpoint:
 
     def test_sync_returns_war_state(self, test_client: TestClient) -> None:
         """Test that /foxhole/sync returns current war state with calculated time."""
-        import time
-
         war_service = get_war_service()
         original_number = war_service.state.war_number
         original_time = war_service.state.start_time
@@ -335,8 +327,6 @@ class TestIndexEndpoint:
 
     def test_index_returns_json_when_no_index_html(self, test_client: TestClient) -> None:
         """Test that index returns JSON fallback when index.html doesn't exist."""
-        from verification_ocr.core.settings import get_settings
-
         settings = get_settings()
         with patch.object(settings.api_server, "serve_frontend", True):
             with patch("verification_ocr.api.server.os.path.exists", return_value=False):
@@ -358,36 +348,45 @@ class TestVerifyEndpoint:
 
     def test_verify_with_valid_images(self, test_client: TestClient) -> None:
         """Test verify endpoint with valid images."""
-        image_bytes = self._create_test_image()
+        profile_bytes = self._create_test_image()
+        shard_bytes = self._create_test_image(width=1920, height=1080)
 
         call_count = [0]
 
         def mock_ocr(*args: Any, **kwargs: Any) -> str:
             call_count[0] += 1
             if call_count[0] == 1:
-                return "TestUser"  # username
+                return "TestUser"  # img1 username
             if call_count[0] == 2:
-                return "Level: 15"  # level
+                return "Level: 15"  # img1 level
             if call_count[0] == 3:
-                return ""  # regiment
-            return "100, 1200\nABLE"  # shard
+                return ""  # img1 regiment
+            if call_count[0] == 4:
+                return ""  # img2 username (no name = shard image)
+            if call_count[0] == 5:
+                return ""  # img1 shard
+            return "100, 1200\nABLE"  # img2 shard
 
         with patch(
             "verification_ocr.services.verification_service.pytesseract.image_to_string",
             side_effect=mock_ocr,
         ):
-            response = test_client.post(
-                "/foxhole/verify",
-                files={
-                    "image1": ("test1.png", io.BytesIO(image_bytes), "image/png"),
-                    "image2": ("test2.png", io.BytesIO(image_bytes), "image/png"),
-                },
-            )
+            with patch(
+                "verification_ocr.services.verification_service.VerificationService._detect_faction",
+                return_value=Faction.COLONIAL,
+            ):
+                response = test_client.post(
+                    "/foxhole/verify",
+                    files={
+                        "image1": ("test1.png", io.BytesIO(profile_bytes), "image/png"),
+                        "image2": ("test2.png", io.BytesIO(shard_bytes), "image/png"),
+                    },
+                )
 
-            assert response.status_code == 200
-            data = response.json()
-            assert data["name"] == "TestUser"
-            assert data["level"] == 15
+                assert response.status_code == 200
+                data = response.json()
+                assert data["name"] == "TestUser"
+                assert data["level"] == 15
 
     def test_verify_missing_image1(self, test_client: TestClient) -> None:
         """Test verify endpoint with missing image1."""
@@ -431,7 +430,7 @@ class TestVerifyEndpoint:
 
             assert response.status_code == 422
             data = response.json()
-            assert "No name found" in data["detail"]
+            assert "No player name found in either image" in data["detail"]
 
     def test_verify_returns_500_on_runtime_error(self, test_client: TestClient) -> None:
         """Test that verify returns 500 error on RuntimeError."""
@@ -521,8 +520,6 @@ class TestRateLimiting:
 
     def test_rate_limit_exceeded_handler(self) -> None:
         """Test rate limit exceeded handler returns proper response."""
-        from slowapi.errors import RateLimitExceeded
-
         mock_request = MagicMock()
         # RateLimitExceeded requires a Limit object, use MagicMock
         mock_limit = MagicMock()
@@ -592,8 +589,6 @@ class TestCORSConfiguration:
         mock_tesseract_available: MagicMock,
     ) -> None:
         """Test that CORS headers are added when origins are configured."""
-        from verification_ocr.core.settings import get_settings
-
         settings = get_settings()
         # Configure CORS origins
         with patch.object(
@@ -620,16 +615,14 @@ class TestCORSConfiguration:
 class TestApiKeyAuthentication:
     """Tests for API key authentication."""
 
-    def _create_test_image(self) -> bytes:
+    def _create_test_image(self, width: int = 3840, height: int = 2160) -> bytes:
         """Create a test image."""
-        img = np.ones((2160, 3840, 3), dtype=np.uint8) * 255
+        img = np.ones((height, width, 3), dtype=np.uint8) * 255
         _, buffer = cv2.imencode(".png", img)
         return buffer.tobytes()
 
     def test_verify_api_key_disabled(self, test_client: TestClient) -> None:
         """Test that API key is not required when disabled."""
-        from verification_ocr.core.settings import get_settings
-
         settings = get_settings()
         # Ensure API key is disabled (None)
         with patch.object(settings.api_server, "api_key", None):
@@ -641,8 +634,6 @@ class TestApiKeyAuthentication:
 
     def test_verify_api_key_required_but_missing(self, test_client: TestClient) -> None:
         """Test that 401 is returned when API key required but not provided."""
-        from verification_ocr.core.settings import get_settings
-
         settings = get_settings()
         # Enable API key requirement
         with patch.object(settings.api_server, "api_key", "test-secret-key"):
@@ -652,8 +643,6 @@ class TestApiKeyAuthentication:
 
     def test_verify_api_key_invalid(self, test_client: TestClient) -> None:
         """Test that 401 is returned when API key is invalid."""
-        from verification_ocr.core.settings import get_settings
-
         settings = get_settings()
         # Enable API key requirement
         with patch.object(settings.api_server, "api_key", "test-secret-key"):
@@ -666,8 +655,6 @@ class TestApiKeyAuthentication:
 
     def test_verify_api_key_valid(self, test_client: TestClient) -> None:
         """Test that request succeeds with valid API key."""
-        from verification_ocr.core.settings import get_settings
-
         settings = get_settings()
         # Enable API key requirement
         with patch.object(settings.api_server, "api_key", "test-secret-key"):
@@ -682,8 +669,6 @@ class TestApiKeyAuthentication:
 
     def test_verify_endpoint_requires_api_key(self, test_client: TestClient) -> None:
         """Test that /foxhole/verify endpoint requires API key when enabled."""
-        from verification_ocr.core.settings import get_settings
-
         settings = get_settings()
         image_bytes = self._create_test_image()
 
@@ -701,26 +686,45 @@ class TestApiKeyAuthentication:
 
     def test_verify_endpoint_with_valid_api_key(self, test_client: TestClient) -> None:
         """Test that /foxhole/verify endpoint works with valid API key."""
-        from verification_ocr.core.settings import get_settings
-
         settings = get_settings()
-        image_bytes = self._create_test_image()
+        profile_bytes = self._create_test_image()
+        shard_bytes = self._create_test_image(width=1920, height=1080)
+
+        call_count = [0]
+
+        def mock_ocr(*args: Any, **kwargs: Any) -> str:
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return "TestUser"  # img1 username
+            if call_count[0] == 2:
+                return "Level: 15"  # img1 level
+            if call_count[0] == 3:
+                return ""  # img1 regiment
+            if call_count[0] == 4:
+                return ""  # img2 username
+            if call_count[0] == 5:
+                return ""  # img1 shard
+            return "100, 1200\nABLE"  # img2 shard
 
         # Enable API key requirement
         with patch.object(settings.api_server, "api_key", "test-secret-key"):
             with patch(
                 "verification_ocr.services.verification_service.pytesseract.image_to_string",
-                return_value="TestUser",
+                side_effect=mock_ocr,
             ):
-                response = test_client.post(
-                    "/foxhole/verify",
-                    files={
-                        "image1": ("test1.png", io.BytesIO(image_bytes), "image/png"),
-                        "image2": ("test2.png", io.BytesIO(image_bytes), "image/png"),
-                    },
-                    headers={"X-API-Key": "test-secret-key"},
-                )
-                assert response.status_code == 200
+                with patch(
+                    "verification_ocr.services.verification_service.VerificationService._detect_faction",
+                    return_value=Faction.COLONIAL,
+                ):
+                    response = test_client.post(
+                        "/foxhole/verify",
+                        files={
+                            "image1": ("test1.png", io.BytesIO(profile_bytes), "image/png"),
+                            "image2": ("test2.png", io.BytesIO(shard_bytes), "image/png"),
+                        },
+                        headers={"X-API-Key": "test-secret-key"},
+                    )
+                    assert response.status_code == 200
 
 
 class TestFrontendServing:
@@ -731,8 +735,6 @@ class TestFrontendServing:
         mock_tesseract_available: MagicMock,
     ) -> None:
         """Test that static files are not mounted when serve_frontend is False."""
-        from verification_ocr.core.settings import get_settings
-
         settings = get_settings()
         with patch.object(settings.api_server, "serve_frontend", False):
             with patch("verification_ocr.api.server.os.path.exists", return_value=True):
@@ -745,8 +747,6 @@ class TestFrontendServing:
         mock_tesseract_available: MagicMock,
     ) -> None:
         """Test that static files are mounted when serve_frontend is True."""
-        from verification_ocr.core.settings import get_settings
-
         settings = get_settings()
         with patch.object(settings.api_server, "serve_frontend", True):
             with patch("verification_ocr.api.server.os.path.exists", return_value=True):
@@ -759,8 +759,6 @@ class TestFrontendServing:
         test_client: TestClient,
     ) -> None:
         """Test that index returns JSON when serve_frontend is False."""
-        from verification_ocr.core.settings import get_settings
-
         settings = get_settings()
         with patch.object(settings.api_server, "serve_frontend", False):
             response = test_client.get("/")
@@ -779,8 +777,6 @@ class TestIndexEndpointSecurity:
         tmp_path: pathlib.Path,
     ) -> None:
         """Test that index returns FileResponse when index.html exists."""
-        from verification_ocr.core.settings import get_settings
-
         # Create a temporary index.html
         index_file = tmp_path / "index.html"
         index_file.write_text("<html><body>Test</body></html>")
@@ -796,8 +792,6 @@ class TestIndexEndpointSecurity:
 
     def test_index_path_traversal_protection(self, test_client: TestClient) -> None:
         """Test that path traversal in index endpoint is prevented."""
-        from verification_ocr.core.settings import get_settings
-
         settings = get_settings()
 
         # Mock realpath to simulate path resolving outside STATIC_DIR

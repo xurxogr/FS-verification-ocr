@@ -2,9 +2,11 @@
 
 import os
 import pathlib
+import shutil
 from unittest.mock import patch
 
 import pytest
+from pydantic import ValidationError
 
 from verification_ocr.core.settings.app_settings import (
     APIServerSettings,
@@ -136,8 +138,6 @@ class TestOCRSettings:
         Test custom tesseract_cmd with valid path.
 
         """
-        import shutil
-
         # Use the real tesseract path if available
         tesseract_path = shutil.which("tesseract")
         if tesseract_path:
@@ -152,8 +152,6 @@ class TestOCRSettings:
         Test custom tesseract_cmd with invalid path raises error.
 
         """
-        from pydantic import ValidationError
-
         with pytest.raises(ValidationError, match="Tesseract binary not found"):
             OCRSettings(tesseract_cmd="/nonexistent/tesseract")
 
@@ -162,8 +160,6 @@ class TestOCRSettings:
         Test custom tesseract_cmd raises error if file exists but is not executable.
 
         """
-        from pydantic import ValidationError
-
         # Create a file that exists but is not executable
         non_exec_file = tmp_path / "tesseract"
         non_exec_file.write_text("not executable")
@@ -185,8 +181,6 @@ class TestOCRSettings:
         Test that empty language string raises validation error.
 
         """
-        from pydantic import ValidationError
-
         with pytest.raises(ValidationError, match="Language string cannot be empty"):
             OCRSettings(language="")
 
@@ -195,8 +189,6 @@ class TestOCRSettings:
         Test that whitespace-only language string raises validation error.
 
         """
-        from pydantic import ValidationError
-
         with pytest.raises(ValidationError, match="Language string cannot be empty"):
             OCRSettings(language="   ")
 

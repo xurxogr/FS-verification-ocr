@@ -2,6 +2,7 @@
 
 import os
 import pathlib
+import time
 from typing import Any
 from unittest.mock import patch
 
@@ -11,7 +12,9 @@ import pytesseract
 import pytest
 
 from verification_ocr.core.settings import AppSettings
+from verification_ocr.enums import Faction
 from verification_ocr.models import ImageRegions, Region
+from verification_ocr.services import get_war_service
 from verification_ocr.services.verification_service import (
     VerificationService,
     calculate_ingame_time_diff,
@@ -295,10 +298,6 @@ class TestGetCurrentIngameTime:
         Test returns time when war state is configured.
 
         """
-        import time
-
-        from verification_ocr.services import get_war_service
-
         war_service = get_war_service()
         # Set start time to 2.5 hours ago
         war_service.initialize(start_time=int((time.time() - 2.5 * 60 * 60) * 1000))
@@ -367,7 +366,8 @@ class TestVerificationServiceInit:
             mock_settings (AppSettings): Mock settings fixture.
 
         """
-        mock_settings.ocr.colonial_icon_path = "/path/to/icon.png"
+        mock_settings.ocr.colonial_icon_path = "/path/to/colonial_icon.png"
+        mock_settings.ocr.wardens_icon_path = None
         mock_icon = np.ones((50, 50, 3), dtype=np.uint8)
 
         with patch(
@@ -375,8 +375,31 @@ class TestVerificationServiceInit:
             return_value=mock_icon,
         ) as mock_imread:
             service = VerificationService(mock_settings)
-            mock_imread.assert_called_once_with("/path/to/icon.png", cv2.IMREAD_COLOR)
+            mock_imread.assert_called_once_with("/path/to/colonial_icon.png", cv2.IMREAD_COLOR)
             assert service.colonial_icon is not None
+
+    def test_init_loads_wardens_icon_when_path_provided(
+        self,
+        mock_settings: AppSettings,
+    ) -> None:
+        """
+        Test that wardens icon is loaded when path is provided.
+
+        Args:
+            mock_settings (AppSettings): Mock settings fixture.
+
+        """
+        mock_settings.ocr.colonial_icon_path = None
+        mock_settings.ocr.wardens_icon_path = "/path/to/wardens_icon.png"
+        mock_icon = np.ones((50, 50, 3), dtype=np.uint8)
+
+        with patch(
+            "verification_ocr.services.verification_service.cv2.imread",
+            return_value=mock_icon,
+        ) as mock_imread:
+            service = VerificationService(mock_settings)
+            mock_imread.assert_called_once_with("/path/to/wardens_icon.png", cv2.IMREAD_COLOR)
+            assert service.wardens_icon is not None
 
     def test_init_logs_warning_when_colonial_icon_file_not_found(
         self,
@@ -389,7 +412,8 @@ class TestVerificationServiceInit:
             mock_settings (AppSettings): Mock settings fixture.
 
         """
-        mock_settings.ocr.colonial_icon_path = "/nonexistent/icon.png"
+        mock_settings.ocr.colonial_icon_path = "/nonexistent/colonial.png"
+        mock_settings.ocr.wardens_icon_path = None
 
         with patch(
             "verification_ocr.services.verification_service.cv2.imread",
@@ -400,8 +424,34 @@ class TestVerificationServiceInit:
             ) as mock_warning:
                 service = VerificationService(mock_settings)
                 mock_warning.assert_called_once()
-                assert "Failed to load" in mock_warning.call_args[0][0]
+                assert "Failed to load colonial icon" in mock_warning.call_args[0][0]
                 assert service.colonial_icon is None
+
+    def test_init_logs_warning_when_wardens_icon_file_not_found(
+        self,
+        mock_settings: AppSettings,
+    ) -> None:
+        """
+        Test that a warning is logged when wardens icon file is not found.
+
+        Args:
+            mock_settings (AppSettings): Mock settings fixture.
+
+        """
+        mock_settings.ocr.colonial_icon_path = None
+        mock_settings.ocr.wardens_icon_path = "/nonexistent/wardens.png"
+
+        with patch(
+            "verification_ocr.services.verification_service.cv2.imread",
+            return_value=None,
+        ):
+            with patch(
+                "verification_ocr.services.verification_service.logger.warning",
+            ) as mock_warning:
+                service = VerificationService(mock_settings)
+                mock_warning.assert_called_once()
+                assert "Failed to load wardens icon" in mock_warning.call_args[0][0]
+                assert service.wardens_icon is None
 
     def test_init_colonial_icon_none_when_no_path(
         self,
@@ -547,16 +597,16 @@ class TestVerificationServiceExtractText:
             assert result == "ABLE"
 
 
-class TestVerificationServiceFindColonialIcon:
-    """Tests for _find_colonial_icon method."""
+class TestVerificationServiceDetectFaction:
+    """Tests for _detect_faction method."""
 
-    def test_find_colonial_icon_returns_none_when_no_template(
+    def test_detect_faction_returns_none_when_no_templates(
         self,
         mock_settings: AppSettings,
         sample_image_bytes: bytes,
     ) -> None:
         """
-        Test that None is returned when no colonial icon template.
+        Test that None is returned when no faction icon templates are loaded.
 
         Args:
             mock_settings (AppSettings): Mock settings fixture.
@@ -568,16 +618,16 @@ class TestVerificationServiceFindColonialIcon:
         assert img is not None
 
         service = VerificationService(mock_settings)
-        result = service._find_colonial_icon(img)
+        result = service._detect_faction(img)
         assert result is None
 
-    def test_find_colonial_icon_with_template(
+    def test_detect_faction_returns_colonial_when_colonial_matches(
         self,
         mock_settings: AppSettings,
         sample_image_bytes: bytes,
     ) -> None:
         """
-        Test colonial icon detection with template.
+        Test that COLONIAL is returned when colonial icon matches above threshold.
 
         Args:
             mock_settings (AppSettings): Mock settings fixture.
@@ -589,11 +639,35 @@ class TestVerificationServiceFindColonialIcon:
         assert img is not None
 
         service = VerificationService(mock_settings)
-        # Set a mock colonial icon
-        service.colonial_icon = np.ones((5, 5, 3), dtype=np.uint8)
+        # Set a mock colonial icon that will match
+        service.colonial_icon = img.copy()
 
-        result = service._find_colonial_icon(img)
-        assert isinstance(result, bool)
+        result = service._detect_faction(img)
+        assert result == Faction.COLONIAL
+
+    def test_detect_faction_returns_wardens_when_wardens_matches(
+        self,
+        mock_settings: AppSettings,
+        sample_image_bytes: bytes,
+    ) -> None:
+        """
+        Test that WARDENS is returned when wardens icon matches above threshold.
+
+        Args:
+            mock_settings (AppSettings): Mock settings fixture.
+            sample_image_bytes (bytes): Sample image bytes fixture.
+
+        """
+        nparr = np.frombuffer(buffer=sample_image_bytes, dtype=np.uint8)
+        img = cv2.imdecode(buf=nparr, flags=cv2.IMREAD_COLOR)
+        assert img is not None
+
+        service = VerificationService(mock_settings)
+        # Set a mock wardens icon that will match
+        service.wardens_icon = img.copy()
+
+        result = service._detect_faction(img)
+        assert result == Faction.WARDENS
 
     def test_find_user_info_sets_faction_colonial(
         self,
@@ -606,14 +680,12 @@ class TestVerificationServiceFindColonialIcon:
             mock_settings (AppSettings): Mock settings fixture.
 
         """
-        from verification_ocr.enums import Faction
-
         img = np.ones((2160, 3840, 3), dtype=np.uint8) * 255
         service = VerificationService(mock_settings)
         regions = service._calculate_regions(img)
 
         with patch.object(service, "_extract_text_from_image", return_value="TestPlayer"):
-            with patch.object(service, "_find_colonial_icon", return_value=True):
+            with patch.object(service, "_detect_faction", return_value=Faction.COLONIAL):
                 result = service._find_user_info(img, regions)
 
                 assert result.faction == Faction.COLONIAL
@@ -996,7 +1068,7 @@ class TestVerificationServiceVerify:
         mock_settings: AppSettings,
     ) -> None:
         """
-        Test that ValueError is raised when no name is found.
+        Test that ValueError is raised when no name is found in either image.
 
         Args:
             mock_settings (AppSettings): Mock settings fixture.
@@ -1012,8 +1084,95 @@ class TestVerificationServiceVerify:
             return_value="",
         ):
             service = VerificationService(mock_settings)
-            with pytest.raises(ValueError, match="No name found"):
+            with pytest.raises(ValueError, match="No player name found in either image"):
                 service.verify(image_bytes, image_bytes)
+
+    def test_verify_raises_error_when_both_images_have_names(
+        self,
+        mock_settings: AppSettings,
+    ) -> None:
+        """
+        Test that ValueError is raised when both images contain player names.
+
+        Args:
+            mock_settings (AppSettings): Mock settings fixture.
+
+        """
+        img1 = np.ones((2160, 3840, 3), dtype=np.uint8) * 255
+        _, buffer1 = cv2.imencode(".png", img1)
+        image1_bytes = buffer1.tobytes()
+
+        img2 = np.ones((2160, 3840, 3), dtype=np.uint8) * 128
+        _, buffer2 = cv2.imencode(".png", img2)
+        image2_bytes = buffer2.tobytes()
+
+        call_count = [0]
+
+        def mock_ocr(*args: Any, **kwargs: Any) -> str:
+            call_count[0] += 1
+            # Both images return a name
+            if call_count[0] == 1:
+                return "Player1"  # img1 username
+            if call_count[0] == 2:
+                return "Level: 25"  # img1 level
+            if call_count[0] == 3:
+                return ""  # img1 regiment
+            if call_count[0] == 4:
+                return "Player2"  # img2 username - also has name!
+            return ""
+
+        with patch(
+            "verification_ocr.services.verification_service.pytesseract.image_to_string",
+            side_effect=mock_ocr,
+        ):
+            service = VerificationService(mock_settings)
+            with pytest.raises(ValueError, match="Both images contain player names"):
+                service.verify(image1_bytes, image2_bytes)
+
+    def test_verify_raises_error_when_no_faction_detected(
+        self,
+        mock_settings: AppSettings,
+    ) -> None:
+        """
+        Test that ValueError is raised when no faction icon is detected.
+
+        Args:
+            mock_settings (AppSettings): Mock settings fixture.
+
+        """
+        profile_img = np.ones((2160, 3840, 3), dtype=np.uint8) * 255
+        _, profile_buffer = cv2.imencode(".png", profile_img)
+        profile_bytes = profile_buffer.tobytes()
+
+        shard_img = np.ones((2160, 3840, 3), dtype=np.uint8) * 128
+        _, shard_buffer = cv2.imencode(".png", shard_img)
+        shard_bytes = shard_buffer.tobytes()
+
+        call_count = [0]
+
+        def mock_ocr(*args: Any, **kwargs: Any) -> str:
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return "TestPlayer"  # img1 username
+            if call_count[0] == 2:
+                return "Level: 25"  # img1 level
+            if call_count[0] == 3:
+                return ""  # img1 regiment
+            if call_count[0] == 4:
+                return ""  # img2 username - no name
+            if call_count[0] == 5:
+                return ""  # img1 shard
+            return "100, 1200\nABLE"  # img2 shard
+
+        with patch(
+            "verification_ocr.services.verification_service.pytesseract.image_to_string",
+            side_effect=mock_ocr,
+        ):
+            service = VerificationService(mock_settings)
+            # Mock faction detection to return None (no faction detected)
+            with patch.object(service, "_detect_faction", return_value=None):
+                with pytest.raises(ValueError, match="Could not detect faction"):
+                    service.verify(profile_bytes, shard_bytes)
 
     def test_verify_extracts_user_info(
         self,
@@ -1026,32 +1185,45 @@ class TestVerificationServiceVerify:
             mock_settings (AppSettings): Mock settings fixture.
 
         """
-        # Create a larger test image
-        img = np.ones((2160, 3840, 3), dtype=np.uint8) * 255
-        _, buffer = cv2.imencode(".png", img)
-        image_bytes = buffer.tobytes()
+        # Create two different test images (profile and shard)
+        profile_img = np.ones((2160, 3840, 3), dtype=np.uint8) * 255
+        _, profile_buffer = cv2.imencode(".png", profile_img)
+        profile_bytes = profile_buffer.tobytes()
+
+        shard_img = np.ones((2160, 3840, 3), dtype=np.uint8) * 128
+        _, shard_buffer = cv2.imencode(".png", shard_img)
+        shard_bytes = shard_buffer.tobytes()
 
         call_count = [0]
 
         def mock_ocr(*args: Any, **kwargs: Any) -> str:
             call_count[0] += 1
+            # img1 (profile): username, level, regiment
             if call_count[0] == 1:
-                return "TestPlayer"  # username region
+                return "TestPlayer"  # img1 username
             if call_count[0] == 2:
-                return "Level: 25"  # level region
+                return "Level: 25"  # img1 level
             if call_count[0] == 3:
-                return ""  # regiment region
-            return "100, 1200\nABLE"  # shard region
+                return ""  # img1 regiment
+            # img2 (shard): username (returns empty = no name)
+            if call_count[0] == 4:
+                return ""  # img2 username - no name found
+            # shard extraction for both images
+            if call_count[0] == 5:
+                return ""  # img1 shard (profile has no shard)
+            return "100, 1200\nABLE"  # img2 shard
 
         with patch(
             "verification_ocr.services.verification_service.pytesseract.image_to_string",
             side_effect=mock_ocr,
         ):
             service = VerificationService(mock_settings)
-            result = service.verify(image_bytes, image_bytes)
+            # Mock faction detection to return COLONIAL
+            with patch.object(service, "_detect_faction", return_value=Faction.COLONIAL):
+                result = service.verify(profile_bytes, shard_bytes)
 
-            assert result.name == "TestPlayer"
-            assert result.level == 25
+                assert result.name == "TestPlayer"
+                assert result.level == 25
 
     def test_verify_handles_malformed_ocr_text(
         self,
@@ -1066,32 +1238,41 @@ class TestVerificationServiceVerify:
             mock_settings (AppSettings): Mock settings fixture.
 
         """
-        img = np.ones((2160, 3840, 3), dtype=np.uint8) * 255
-        _, buffer = cv2.imencode(".png", img)
-        image_bytes = buffer.tobytes()
+        profile_img = np.ones((2160, 3840, 3), dtype=np.uint8) * 255
+        _, profile_buffer = cv2.imencode(".png", profile_img)
+        profile_bytes = profile_buffer.tobytes()
+
+        shard_img = np.ones((2160, 3840, 3), dtype=np.uint8) * 128
+        _, shard_buffer = cv2.imencode(".png", shard_img)
+        shard_bytes = shard_buffer.tobytes()
 
         call_count = [0]
 
         def mock_ocr(*args: Any, **kwargs: Any) -> str:
             call_count[0] += 1
             if call_count[0] == 1:
-                return "TestPlayer"  # username region
+                return "TestPlayer"  # img1 username
             if call_count[0] == 2:
-                return "Level abc"  # level region - no colon
+                return "Level abc"  # img1 level - no colon
             if call_count[0] == 3:
-                return ""  # regiment region
-            return "100, 1200\nABLE"  # shard region
+                return ""  # img1 regiment
+            if call_count[0] == 4:
+                return ""  # img2 username - no name
+            if call_count[0] == 5:
+                return ""  # img1 shard
+            return "100, 1200\nABLE"  # img2 shard
 
         with patch(
             "verification_ocr.services.verification_service.pytesseract.image_to_string",
             side_effect=mock_ocr,
         ):
             service = VerificationService(mock_settings)
-            result = service.verify(image_bytes, image_bytes)
+            with patch.object(service, "_detect_faction", return_value=Faction.COLONIAL):
+                result = service.verify(profile_bytes, shard_bytes)
 
-            # Should not crash - name extracted but level parsing failed gracefully
-            assert result.name == "TestPlayer"
-            assert result.level is None
+                # Should not crash - name extracted but level parsing failed gracefully
+                assert result.name == "TestPlayer"
+                assert result.level is None
 
     def test_verify_handles_level_with_colon_but_no_digits(
         self,
@@ -1106,31 +1287,40 @@ class TestVerificationServiceVerify:
             mock_settings (AppSettings): Mock settings fixture.
 
         """
-        img = np.ones((2160, 3840, 3), dtype=np.uint8) * 255
-        _, buffer = cv2.imencode(".png", img)
-        image_bytes = buffer.tobytes()
+        profile_img = np.ones((2160, 3840, 3), dtype=np.uint8) * 255
+        _, profile_buffer = cv2.imencode(".png", profile_img)
+        profile_bytes = profile_buffer.tobytes()
+
+        shard_img = np.ones((2160, 3840, 3), dtype=np.uint8) * 128
+        _, shard_buffer = cv2.imencode(".png", shard_img)
+        shard_bytes = shard_buffer.tobytes()
 
         call_count = [0]
 
         def mock_ocr(*args: Any, **kwargs: Any) -> str:
             call_count[0] += 1
             if call_count[0] == 1:
-                return "TestPlayer"  # username region
+                return "TestPlayer"  # img1 username
             if call_count[0] == 2:
-                return "Level: abc"  # level region - has colon but no digits
+                return "Level: abc"  # img1 level - has colon but no digits
             if call_count[0] == 3:
-                return ""  # regiment region
-            return "100, 1200\nABLE"  # shard region
+                return ""  # img1 regiment
+            if call_count[0] == 4:
+                return ""  # img2 username - no name
+            if call_count[0] == 5:
+                return ""  # img1 shard
+            return "100, 1200\nABLE"  # img2 shard
 
         with patch(
             "verification_ocr.services.verification_service.pytesseract.image_to_string",
             side_effect=mock_ocr,
         ):
             service = VerificationService(mock_settings)
-            result = service.verify(image_bytes, image_bytes)
+            with patch.object(service, "_detect_faction", return_value=Faction.COLONIAL):
+                result = service.verify(profile_bytes, shard_bytes)
 
-            assert result.name == "TestPlayer"
-            assert result.level is None
+                assert result.name == "TestPlayer"
+                assert result.level is None
 
     def test_verify_logs_info(
         self,
@@ -1161,48 +1351,56 @@ class TestVerificationServiceVerify:
 
                 mock_log.assert_called_once_with("Processing image pair for verification")
 
-    def test_verify_tries_second_image_if_first_has_no_name(
+    def test_verify_uses_correct_image_for_user_info(
         self,
         mock_settings: AppSettings,
     ) -> None:
         """
-        Test that second image is tried if first has no name.
+        Test that user info is extracted from the correct image.
+
+        When first image has no name, user info comes from second image.
 
         Args:
             mock_settings (AppSettings): Mock settings fixture.
 
         """
-        img = np.ones((2160, 3840, 3), dtype=np.uint8) * 255
-        _, buffer = cv2.imencode(".png", img)
-        image_bytes = buffer.tobytes()
+        shard_img = np.ones((2160, 3840, 3), dtype=np.uint8) * 128
+        _, shard_buffer = cv2.imencode(".png", shard_img)
+        shard_bytes = shard_buffer.tobytes()
+
+        profile_img = np.ones((2160, 3840, 3), dtype=np.uint8) * 255
+        _, profile_buffer = cv2.imencode(".png", profile_img)
+        profile_bytes = profile_buffer.tobytes()
 
         call_count = [0]
 
         def mock_ocr(*args: Any, **kwargs: Any) -> str:
             call_count[0] += 1
-            # Call 1: first image username -> empty (no name found, returns early)
-            # Call 2: second image username -> return name
-            # Call 3: second image level -> return level
-            # Call 4: second image regiment -> doesn't matter
-            # Call 5: first image shard -> doesn't matter
+            # img1 (shard): username only (returns empty)
             if call_count[0] == 1:
-                return ""  # first image has no name
+                return ""  # img1 has no name
+            # img2 (profile): username, level, regiment
             if call_count[0] == 2:
-                return "SecondPlayer"  # second image username
+                return "SecondPlayer"  # img2 username
             if call_count[0] == 3:
-                return "Level: 30"  # second image level
+                return "Level: 30"  # img2 level
             if call_count[0] == 4:
-                return ""  # regiment
-            return "100, 1200\nABLE"  # shard
+                return ""  # img2 regiment
+            # shard extraction
+            if call_count[0] == 5:
+                return "100, 1200\nABLE"  # img1 shard
+            return ""  # img2 shard
 
         with patch(
             "verification_ocr.services.verification_service.pytesseract.image_to_string",
             side_effect=mock_ocr,
         ):
             service = VerificationService(mock_settings)
-            result = service.verify(image_bytes, image_bytes)
+            with patch.object(service, "_detect_faction", return_value=Faction.COLONIAL):
+                result = service.verify(shard_bytes, profile_bytes)
 
-            assert result.name == "SecondPlayer"
+                assert result.name == "SecondPlayer"
+                assert result.shard == "ABLE"
 
     def test_verify_saves_debug_images_when_debug_mode(
         self,
@@ -1220,19 +1418,40 @@ class TestVerificationServiceVerify:
         mock_settings.ocr.debug_mode = True
         mock_settings.ocr.debug_output_dir = str(tmp_path)
 
-        img = np.ones((500, 500, 3), dtype=np.uint8) * 255
-        _, buffer = cv2.imencode(".png", img)
-        image_bytes = buffer.tobytes()
+        profile_img = np.ones((2160, 3840, 3), dtype=np.uint8) * 255
+        _, profile_buffer = cv2.imencode(".png", profile_img)
+        profile_bytes = profile_buffer.tobytes()
+
+        shard_img = np.ones((2160, 3840, 3), dtype=np.uint8) * 128
+        _, shard_buffer = cv2.imencode(".png", shard_img)
+        shard_bytes = shard_buffer.tobytes()
+
+        call_count = [0]
+
+        def mock_ocr(*args: Any, **kwargs: Any) -> str:
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return "TestPlayer"  # img1 username
+            if call_count[0] == 2:
+                return "Level: 25"  # img1 level
+            if call_count[0] == 3:
+                return ""  # img1 regiment
+            if call_count[0] == 4:
+                return ""  # img2 username
+            if call_count[0] == 5:
+                return ""  # img1 shard
+            return "100, 1200\nABLE"  # img2 shard
 
         with patch(
             "verification_ocr.services.verification_service.pytesseract.image_to_string",
-            return_value="TestPlayer Icon Level: 25\n",
+            side_effect=mock_ocr,
         ):
             service = VerificationService(mock_settings)
-            service.verify(image_bytes, image_bytes)
+            with patch.object(service, "_detect_faction", return_value=Faction.COLONIAL):
+                service.verify(profile_bytes, shard_bytes)
 
-            assert os.path.exists(tmp_path / "debug_image1_regions.png")
-            assert os.path.exists(tmp_path / "debug_image2_regions.png")
+                assert os.path.exists(tmp_path / "debug_image1_regions.png")
+                assert os.path.exists(tmp_path / "debug_image2_regions.png")
 
     def test_verify_includes_shard_and_ingame_time(
         self,
@@ -1245,32 +1464,40 @@ class TestVerificationServiceVerify:
             mock_settings (AppSettings): Mock settings fixture.
 
         """
-        img = np.ones((2160, 3840, 3), dtype=np.uint8) * 255
-        _, buffer = cv2.imencode(".png", img)
-        image_bytes = buffer.tobytes()
+        profile_img = np.ones((2160, 3840, 3), dtype=np.uint8) * 255
+        _, profile_buffer = cv2.imencode(".png", profile_img)
+        profile_bytes = profile_buffer.tobytes()
+
+        shard_img = np.ones((2160, 3840, 3), dtype=np.uint8) * 128
+        _, shard_buffer = cv2.imencode(".png", shard_img)
+        shard_bytes = shard_buffer.tobytes()
 
         call_count = [0]
 
         def mock_ocr(*args: Any, **kwargs: Any) -> str:
             call_count[0] += 1
-            # Call 1: username extraction for image1
-            # Call 2: regiment extraction for image1
-            # Call 3: shard/time extraction for image2
             if call_count[0] == 1:
-                return "TestPlayer Icon Level: 25\n"
+                return "TestPlayer"  # img1 username
             if call_count[0] == 2:
-                return ""  # Regiment
-            return "1234, 1530\nABLE"  # Shard and time
+                return "Level: 25"  # img1 level
+            if call_count[0] == 3:
+                return ""  # img1 regiment
+            if call_count[0] == 4:
+                return ""  # img2 username
+            if call_count[0] == 5:
+                return ""  # img1 shard
+            return "1234, 1530\nABLE"  # img2 shard
 
         with patch(
             "verification_ocr.services.verification_service.pytesseract.image_to_string",
             side_effect=mock_ocr,
         ):
             service = VerificationService(mock_settings)
-            result = service.verify(image_bytes, image_bytes)
+            with patch.object(service, "_detect_faction", return_value=Faction.COLONIAL):
+                result = service.verify(profile_bytes, shard_bytes)
 
-            assert result.shard == "ABLE"
-            assert result.ingame_time == "1234, 15:30"
+                assert result.shard == "ABLE"
+                assert result.ingame_time == "1234, 15:30"
 
     def test_verify_includes_war_number_and_current_ingame_time(
         self,
@@ -1283,10 +1510,6 @@ class TestVerificationServiceVerify:
             mock_settings (AppSettings): Mock settings fixture.
 
         """
-        import time
-
-        from verification_ocr.services import get_war_service
-
         # Set up war state
         war_service = get_war_service()
         war_service.initialize(
@@ -1294,54 +1517,73 @@ class TestVerificationServiceVerify:
             start_time=int((time.time() - 100 * 60 * 60) * 1000),
         )
 
-        img = np.ones((2160, 3840, 3), dtype=np.uint8) * 255
-        _, buffer = cv2.imencode(".png", img)
-        image_bytes = buffer.tobytes()
+        profile_img = np.ones((2160, 3840, 3), dtype=np.uint8) * 255
+        _, profile_buffer = cv2.imencode(".png", profile_img)
+        profile_bytes = profile_buffer.tobytes()
+
+        shard_img = np.ones((2160, 3840, 3), dtype=np.uint8) * 128
+        _, shard_buffer = cv2.imencode(".png", shard_img)
+        shard_bytes = shard_buffer.tobytes()
 
         call_count = [0]
 
         def mock_ocr(*args: Any, **kwargs: Any) -> str:
             call_count[0] += 1
             if call_count[0] == 1:
-                return "TestPlayer Icon Level: 25\n"
+                return "TestPlayer"  # img1 username
             if call_count[0] == 2:
-                return ""
-            return "100, 1200\nABLE"
+                return "Level: 25"  # img1 level
+            if call_count[0] == 3:
+                return ""  # img1 regiment
+            if call_count[0] == 4:
+                return ""  # img2 username
+            if call_count[0] == 5:
+                return ""  # img1 shard
+            return "100, 1200\nABLE"  # img2 shard
 
         with patch(
             "verification_ocr.services.verification_service.pytesseract.image_to_string",
             side_effect=mock_ocr,
         ):
             service = VerificationService(mock_settings)
-            result = service.verify(image_bytes, image_bytes)
+            with patch.object(service, "_detect_faction", return_value=Faction.COLONIAL):
+                result = service.verify(profile_bytes, shard_bytes)
 
-            assert result.war_number == 132
-            assert result.current_ingame_time is not None
+                assert result.war_number == 132
+                assert result.current_ingame_time is not None
 
-    def test_verify_returns_ingame_time_none_when_ocr_empty(
+    def test_verify_returns_ingame_time_none_when_no_shard_info(
         self,
         mock_settings: AppSettings,
     ) -> None:
         """
-        Test that ingame_time is None when OCR returns empty shard region.
+        Test that error is raised when no shard info is found.
 
         Args:
             mock_settings (AppSettings): Mock settings fixture.
 
         """
-        img = np.ones((2160, 3840, 3), dtype=np.uint8) * 255
-        _, buffer = cv2.imencode(".png", img)
-        image_bytes = buffer.tobytes()
+        profile_img = np.ones((2160, 3840, 3), dtype=np.uint8) * 255
+        _, profile_buffer = cv2.imencode(".png", profile_img)
+        profile_bytes = profile_buffer.tobytes()
+
+        shard_img = np.ones((2160, 3840, 3), dtype=np.uint8) * 128
+        _, shard_buffer = cv2.imencode(".png", shard_img)
+        shard_bytes = shard_buffer.tobytes()
 
         call_count = [0]
 
         def mock_ocr(*args: Any, **kwargs: Any) -> str:
             call_count[0] += 1
             if call_count[0] == 1:
-                return "TestPlayer Icon Level: 25\n"
+                return "TestPlayer"  # img1 username
             if call_count[0] == 2:
-                return ""
-            # Return empty string so ingame_time will be None
+                return "Level: 25"  # img1 level
+            if call_count[0] == 3:
+                return ""  # img1 regiment
+            if call_count[0] == 4:
+                return ""  # img2 username
+            # Return empty for both shard regions
             return ""
 
         with patch(
@@ -1349,9 +1591,8 @@ class TestVerificationServiceVerify:
             side_effect=mock_ocr,
         ):
             service = VerificationService(mock_settings)
-            result = service.verify(image_bytes, image_bytes)
-
-            assert result.ingame_time is None
+            with pytest.raises(ValueError, match="No shard information found in either image"):
+                service.verify(profile_bytes, shard_bytes)
 
     def test_verify_returns_result_when_war_not_configured(
         self,
@@ -1366,31 +1607,41 @@ class TestVerificationServiceVerify:
         """
         # War state is reset by conftest, so current_time will be None
 
-        img = np.ones((2160, 3840, 3), dtype=np.uint8) * 255
-        _, buffer = cv2.imencode(".png", img)
-        image_bytes = buffer.tobytes()
+        profile_img = np.ones((2160, 3840, 3), dtype=np.uint8) * 255
+        _, profile_buffer = cv2.imencode(".png", profile_img)
+        profile_bytes = profile_buffer.tobytes()
+
+        shard_img = np.ones((2160, 3840, 3), dtype=np.uint8) * 128
+        _, shard_buffer = cv2.imencode(".png", shard_img)
+        shard_bytes = shard_buffer.tobytes()
 
         call_count = [0]
 
         def mock_ocr(*args: Any, **kwargs: Any) -> str:
             call_count[0] += 1
             if call_count[0] == 1:
-                return "TestPlayer Icon Level: 25\n"
+                return "TestPlayer"  # img1 username
             if call_count[0] == 2:
-                return ""
-            # Return valid time format
-            return "100, 1200\nABLE"
+                return "Level: 25"  # img1 level
+            if call_count[0] == 3:
+                return ""  # img1 regiment
+            if call_count[0] == 4:
+                return ""  # img2 username
+            if call_count[0] == 5:
+                return ""  # img1 shard
+            return "100, 1200\nABLE"  # img2 shard
 
         with patch(
             "verification_ocr.services.verification_service.pytesseract.image_to_string",
             side_effect=mock_ocr,
         ):
             service = VerificationService(mock_settings)
-            result = service.verify(image_bytes, image_bytes)
+            with patch.object(service, "_detect_faction", return_value=Faction.COLONIAL):
+                result = service.verify(profile_bytes, shard_bytes)
 
-            assert result.ingame_time == "100, 12:00"
-            assert result.war_number is None
-            assert result.current_ingame_time is None
+                assert result.ingame_time == "100, 12:00"
+                assert result.war_number is None
+                assert result.current_ingame_time is None
 
 
 class TestVerificationServiceIntegration:
@@ -1398,7 +1649,7 @@ class TestVerificationServiceIntegration:
 
     def test_verify_colonial_with_real_images(
         self,
-        mock_settings: AppSettings,
+        integration_settings: AppSettings,
         colonial_image_bytes: bytes,
         stockpile_image_bytes: bytes,
     ) -> None:
@@ -1406,20 +1657,21 @@ class TestVerificationServiceIntegration:
         Test verification with real colonial game screenshots.
 
         Args:
-            mock_settings (AppSettings): Mock settings fixture.
+            integration_settings (AppSettings): Integration settings with real icons.
             colonial_image_bytes (bytes): Real colonial user screenshot.
             stockpile_image_bytes (bytes): Real stockpile screenshot.
 
         """
-        service = VerificationService(mock_settings)
+        service = VerificationService(integration_settings)
         result = service.verify(colonial_image_bytes, stockpile_image_bytes)
 
         assert result.name is not None
         assert result.level is not None
+        assert result.faction == Faction.COLONIAL
 
     def test_verify_warden_with_real_images(
         self,
-        mock_settings: AppSettings,
+        integration_settings: AppSettings,
         warden_image_bytes: bytes,
         stockpile_image_bytes: bytes,
     ) -> None:
@@ -1427,26 +1679,23 @@ class TestVerificationServiceIntegration:
         Test verification with real warden game screenshots.
 
         Args:
-            mock_settings (AppSettings): Mock settings fixture.
+            integration_settings (AppSettings): Integration settings with real icons.
             warden_image_bytes (bytes): Real warden user screenshot.
             stockpile_image_bytes (bytes): Real stockpile screenshot.
 
         """
-        from verification_ocr.enums import Faction
-
-        service = VerificationService(mock_settings)
+        service = VerificationService(integration_settings)
         result = service.verify(warden_image_bytes, stockpile_image_bytes)
 
         assert result.name is not None
         assert result.level is not None
-        # Warden should not be detected as colonial (WARDENS or None if template not configured)
-        assert result.faction != Faction.COLONIAL
+        assert result.faction == Faction.WARDENS
         # Warden image has no regiment
         assert result.regiment is None
 
     def test_verify_extracts_shard_from_real_image(
         self,
-        mock_settings: AppSettings,
+        integration_settings: AppSettings,
         colonial_image_bytes: bytes,
         stockpile_image_bytes: bytes,
     ) -> None:
@@ -1454,12 +1703,12 @@ class TestVerificationServiceIntegration:
         Test shard extraction from real stockpile screenshot.
 
         Args:
-            mock_settings (AppSettings): Mock settings fixture.
+            integration_settings (AppSettings): Integration settings with real icons.
             colonial_image_bytes (bytes): Real colonial user screenshot.
             stockpile_image_bytes (bytes): Real stockpile screenshot.
 
         """
-        service = VerificationService(mock_settings)
+        service = VerificationService(integration_settings)
         result = service.verify(colonial_image_bytes, stockpile_image_bytes)
 
         # Shard should be extracted from stockpile image
@@ -1467,7 +1716,7 @@ class TestVerificationServiceIntegration:
 
     def test_verify_extracts_regiment_name_from_colonial(
         self,
-        mock_settings: AppSettings,
+        integration_settings: AppSettings,
         colonial_image_bytes: bytes,
         stockpile_image_bytes: bytes,
     ) -> None:
@@ -1475,12 +1724,12 @@ class TestVerificationServiceIntegration:
         Test regiment name extraction from colonial user screenshot.
 
         Args:
-            mock_settings (AppSettings): Mock settings fixture.
+            integration_settings (AppSettings): Integration settings with real icons.
             colonial_image_bytes (bytes): Real colonial user screenshot.
             stockpile_image_bytes (bytes): Real stockpile screenshot.
 
         """
-        service = VerificationService(mock_settings)
+        service = VerificationService(integration_settings)
         result = service.verify(colonial_image_bytes, stockpile_image_bytes)
 
         # Colonial user is in a regiment - regiment field contains the name
@@ -1490,7 +1739,7 @@ class TestVerificationServiceIntegration:
 
     def test_verify_warden_has_no_regiment(
         self,
-        mock_settings: AppSettings,
+        integration_settings: AppSettings,
         warden_image_bytes: bytes,
         stockpile_image_bytes: bytes,
     ) -> None:
@@ -1498,12 +1747,12 @@ class TestVerificationServiceIntegration:
         Test that warden user without regiment has None for regiment.
 
         Args:
-            mock_settings (AppSettings): Mock settings fixture.
+            integration_settings (AppSettings): Integration settings with real icons.
             warden_image_bytes (bytes): Real warden user screenshot.
             stockpile_image_bytes (bytes): Real stockpile screenshot.
 
         """
-        service = VerificationService(mock_settings)
+        service = VerificationService(integration_settings)
         result = service.verify(warden_image_bytes, stockpile_image_bytes)
 
         # Warden user is not in a regiment - regiment is None

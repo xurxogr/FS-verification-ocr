@@ -3,8 +3,10 @@
 import logging
 import pathlib
 import subprocess
+from logging.handlers import TimedRotatingFileHandler
 from unittest.mock import MagicMock, patch
 
+from verification_ocr.core.settings.app_settings import LoggingSettings
 from verification_ocr.core.utils import (
     HealthCheckFilter,
     get_tesseract_version,
@@ -167,8 +169,6 @@ class TestSetupLogging:
         Test setup_logging with default settings.
 
         """
-        from verification_ocr.core.settings.app_settings import LoggingSettings
-
         settings = LoggingSettings()
         setup_logging(settings=settings)
 
@@ -180,8 +180,6 @@ class TestSetupLogging:
         Test setup_logging with custom level.
 
         """
-        from verification_ocr.core.settings.app_settings import LoggingSettings
-
         settings = LoggingSettings(log_level="DEBUG")
         setup_logging(settings=settings)
 
@@ -193,8 +191,6 @@ class TestSetupLogging:
         Test setup_logging with custom logger levels.
 
         """
-        from verification_ocr.core.settings.app_settings import LoggingSettings
-
         settings = LoggingSettings(
             log_level="INFO",
             loggers={"test_logger": "WARNING"},
@@ -212,8 +208,6 @@ class TestSetupLogging:
             tmp_path: Pytest fixture for temporary directory.
 
         """
-        from verification_ocr.core.settings.app_settings import LoggingSettings
-
         log_file = tmp_path / "test.log"
         settings = LoggingSettings(log_file=str(log_file))
         setup_logging(settings=settings)
@@ -232,9 +226,6 @@ class TestSetupLogging:
         Test that health check filter is added to uvicorn.access logger.
 
         """
-        from verification_ocr.core.settings.app_settings import LoggingSettings
-        from verification_ocr.core.utils import HealthCheckFilter
-
         settings = LoggingSettings()
         setup_logging(settings=settings)
 
@@ -252,10 +243,6 @@ class TestSetupLogging:
             tmp_path: Pytest fixture for temporary directory.
 
         """
-        from logging.handlers import TimedRotatingFileHandler
-
-        from verification_ocr.core.settings.app_settings import LoggingSettings
-
         log_file = tmp_path / "test_rotating.log"
         settings = LoggingSettings(log_file=str(log_file), rotate_logs=True)
         setup_logging(settings=settings)

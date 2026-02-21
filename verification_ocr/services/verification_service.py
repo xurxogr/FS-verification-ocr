@@ -139,7 +139,7 @@ class VerificationService:
         if settings.ocr.tesseract_cmd:
             pytesseract.pytesseract.tesseract_cmd = settings.ocr.tesseract_cmd
 
-        # Load colonial icon if path is provided
+        # Load faction icons if paths are provided
         self.colonial_icon: cv2.typing.MatLike | None = None
         if settings.ocr.colonial_icon_path:
             self.colonial_icon = cv2.imread(settings.ocr.colonial_icon_path, cv2.IMREAD_COLOR)
@@ -147,6 +147,12 @@ class VerificationService:
                 logger.warning(
                     f"Failed to load colonial icon from {settings.ocr.colonial_icon_path}"
                 )
+
+        self.wardens_icon: cv2.typing.MatLike | None = None
+        if settings.ocr.wardens_icon_path:
+            self.wardens_icon = cv2.imread(settings.ocr.wardens_icon_path, cv2.IMREAD_COLOR)
+            if self.wardens_icon is None:
+                logger.warning(f"Failed to load wardens icon from {settings.ocr.wardens_icon_path}")
 
         # Create debug output directory if debug mode is enabled
         if settings.ocr.debug_mode:
@@ -274,25 +280,29 @@ class VerificationService:
 
         return np.asarray(a=result, dtype=np.uint8)
 
-    def _find_colonial_icon(self, image: cv2.typing.MatLike) -> bool | None:
+    def _match_template(
+        self,
+        image: cv2.typing.MatLike,
+        template: cv2.typing.MatLike,
+        threshold: float = 0.7,
+    ) -> float:
         """
-        Find the colonial icon in the image using template matching.
+        Match a template against an image region.
 
         Args:
-            image (cv2.typing.MatLike): Image to search for colonial icon.
+            image (cv2.typing.MatLike): Image to search in.
+            template (cv2.typing.MatLike): Template to search for.
+            threshold: Minimum match value (not used in return, just for reference).
 
         Returns:
-            bool | None: True if colonial icon found, False if not, None if no template.
+            float: Match confidence value (0.0 to 1.0).
         """
-        if self.colonial_icon is None:
-            return None
-
         # Calculate the scale to match the height of the image
-        scale = image.shape[0] / self.colonial_icon.shape[0]
+        scale = image.shape[0] / template.shape[0]
 
         # Resize the template according to the scale
         resized_template = cv2.resize(
-            src=self.colonial_icon,
+            src=template,
             dsize=None,
             fx=scale,
             fy=scale,
@@ -307,7 +317,39 @@ class VerificationService:
         )
 
         _, max_val, _, _ = cv2.minMaxLoc(result)
-        return max_val > 0.7
+        return max_val
+
+    def _detect_faction(self, image: cv2.typing.MatLike) -> Faction | None:
+        """
+        Detect faction from the icon region using template matching.
+
+        Matches against both colonial and wardens icons and returns the faction
+        with the highest confidence above threshold.
+
+        Args:
+            image (cv2.typing.MatLike): Icon region image.
+
+        Returns:
+            Faction | None: Detected faction, or None if no match above threshold.
+        """
+        threshold = 0.7
+        colonial_score = 0.0
+        wardens_score = 0.0
+
+        if self.colonial_icon is not None:
+            colonial_score = self._match_template(image, self.colonial_icon, threshold)
+
+        if self.wardens_icon is not None:
+            wardens_score = self._match_template(image, self.wardens_icon, threshold)
+
+        # Return the faction with the highest score above threshold
+        if colonial_score >= threshold and colonial_score >= wardens_score:
+            return Faction.COLONIAL
+        if wardens_score >= threshold and wardens_score > colonial_score:
+            return Faction.WARDENS
+
+        # No faction detected above threshold
+        return None
 
     def _calculate_regions(
         self,
@@ -548,14 +590,10 @@ class VerificationService:
             if digits:
                 data.level = int(digits)
 
-        # Check for colonial faction icon in icon region
+        # Detect faction from icon region
         r = regions.icon
         icon_image = image[r.y1 : r.y2, r.x1 : r.x2]
-        is_colonial = self._find_colonial_icon(icon_image)
-        if is_colonial is True:
-            data.faction = Faction.COLONIAL
-        elif is_colonial is False:
-            data.faction = Faction.WARDENS
+        data.faction = self._detect_faction(icon_image)
 
         # Extract Regiment name from grey bar region
         r = regions.regiment
@@ -716,25 +754,50 @@ class VerificationService:
                     filename="debug_image2_regions.png",
                 )
 
-            # Try to find user info in first image, fallback to second
-            verification = self._find_user_info(image=img1, regions=regions1)
-            if verification.name is None:
-                verification = self._find_user_info(image=img2, regions=regions2)
-                shard, ingame_time = self._get_shard_and_time(
-                    image=img1,
-                    regions=regions1,
+            # Try to extract user info from both images
+            user_info1 = self._find_user_info(image=img1, regions=regions1)
+            user_info2 = self._find_user_info(image=img2, regions=regions2)
+
+            # Try to extract shard info from both images
+            shard1, time1 = self._get_shard_and_time(image=img1, regions=regions1)
+            shard2, time2 = self._get_shard_and_time(image=img2, regions=regions2)
+
+            # Determine which image has user info (name) and which has shard info
+            has_user_info1 = user_info1.name is not None
+            has_user_info2 = user_info2.name is not None
+            has_shard_info1 = shard1 is not None
+            has_shard_info2 = shard2 is not None
+
+            # Validate we have exactly one image with user info
+            if not has_user_info1 and not has_user_info2:
+                raise ValueError("No player name found in either image")
+            if has_user_info1 and has_user_info2:
+                raise ValueError(
+                    "Both images contain player names - need one profile image "
+                    "and one map/shard image"
                 )
+
+            # Validate we have exactly one image with shard info
+            if not has_shard_info1 and not has_shard_info2:
+                raise ValueError("No shard information found in either image")
+
+            # Select the correct data from each image
+            if has_user_info1:
+                verification = user_info1
+                shard, ingame_time = shard2, time2
             else:
-                shard, ingame_time = self._get_shard_and_time(
-                    image=img2,
-                    regions=regions2,
-                )
+                verification = user_info2
+                shard, ingame_time = shard1, time1
 
             verification.shard = shard
             verification.ingame_time = ingame_time
 
-            if verification.name is None:
-                raise ValueError("No name found in any of the images")
+            # Validate faction was detected
+            if verification.faction is None:
+                raise ValueError(
+                    "Could not detect faction - no colonial or wardens icon found in "
+                    "the profile image"
+                )
 
             # Add war state info
             war_service = get_war_service()
