@@ -3,6 +3,7 @@
 import logging
 import os
 import re
+import time
 
 import cv2
 import numpy as np
@@ -716,8 +717,11 @@ class VerificationService:
         """
         logger.info("Processing image pair for verification")
 
+        start_time = time.perf_counter()
+
         try:
             # Decode images
+            decode_start = time.perf_counter()
             images: list[MatLike | None] = []
             for img_bytes in [image1_bytes, image2_bytes]:
                 nparr = np.frombuffer(buffer=img_bytes, dtype=np.uint8)
@@ -731,6 +735,7 @@ class VerificationService:
             # Extract decoded images (now guaranteed to be non-None)
             img1: MatLike = images[0]
             img2: MatLike = images[1]
+            decode_time = time.perf_counter() - decode_start
 
             # Validate minimum image dimensions
             for i, img in enumerate([img1, img2]):
@@ -755,12 +760,14 @@ class VerificationService:
                 )
 
             # Try to extract user info from both images
+            ocr_start = time.perf_counter()
             user_info1 = self._find_user_info(image=img1, regions=regions1)
             user_info2 = self._find_user_info(image=img2, regions=regions2)
 
             # Try to extract shard info from both images
             shard1, time1 = self._get_shard_and_time(image=img1, regions=regions1)
             shard2, time2 = self._get_shard_and_time(image=img2, regions=regions2)
+            ocr_time = time.perf_counter() - ocr_start
 
             # Determine which image has user info (name) and which has shard info
             has_user_info1 = user_info1.name is not None
@@ -810,6 +817,12 @@ class VerificationService:
                 verification.current_ingame_time = (
                     f"{current_day}, {current_hour:02d}:{current_minute:02d}"
                 )
+
+            total_time = time.perf_counter() - start_time
+            logger.info(
+                f"Verification completed in {total_time:.3f}s "
+                f"(decode: {decode_time:.3f}s, ocr: {ocr_time:.3f}s)"
+            )
 
             return verification
 
