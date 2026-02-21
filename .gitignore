@@ -52,3 +52,18 @@ screenshots/
 # OS
 .DS_Store
 Thumbs.db
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# ruff
+.ruff_cache/
+
+# Coverage
+coverage.xml
+junit.xml
+
+# Claude
+.claude/

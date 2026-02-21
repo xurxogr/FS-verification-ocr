@@ -1,0 +1,63 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+junit.xml
+coverage.xml
+
+# Git
+.git/
+.gitignore
+
+# Documentation (not needed in container)
+docs/
+*.md
+!README.md
+
+# CI/CD
+.github/
+
+# Development tools
+.pre-commit-config.yaml
+.ruff_cache/
+.mypy_cache/
+
+# Test files
+tests/
+
+# Debug output
+screenshots/
+logs/
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Claude
+.claude/
