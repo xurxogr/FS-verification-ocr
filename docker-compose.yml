@@ -1,8 +1,13 @@
 services:
   verification-ocr:
+    # Build with specific Python version:
+    # PYTHON_VERSION=3.13 docker-compose up -d --build
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        PYTHON_VERSION: ${PYTHON_VERSION:-3.12}
+    image: verification-ocr:latest
     container_name: verification-ocr
     ports:
       - "127.0.0.1:8000:8000"

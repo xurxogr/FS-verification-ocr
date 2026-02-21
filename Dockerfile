@@ -1,7 +1,9 @@
 # syntax=docker/dockerfile:1
 
-# Build stage
-FROM python:3.12-slim AS builder
+# Multi-stage build for smaller final image
+# Build with: docker build --build-arg PYTHON_VERSION=3.13 .
+ARG PYTHON_VERSION=3.12
+FROM python:${PYTHON_VERSION}-slim AS builder
 
 WORKDIR /app
 
@@ -15,13 +17,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
-# Install Python dependencies
+# Copy pyproject.toml and __init__.py for dependency installation
 COPY pyproject.toml README.md ./
+COPY verification_ocr/__init__.py ./verification_ocr/__init__.py
+
+# Install Python dependencies
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir .
+    pip install --no-cache-dir . && \
+    # Strip debug symbols for smaller image
+    find /opt/venv -name "*.so" -exec strip --strip-debug {} \; 2>/dev/null || true
 
 # Runtime stage
-FROM python:3.12-slim
+ARG PYTHON_VERSION=3.12
+FROM python:${PYTHON_VERSION}-slim
 
 WORKDIR /app
 
@@ -49,6 +57,9 @@ COPY pyproject.toml README.md ./
 
 # Install package (no deps - already installed in venv)
 RUN pip install --no-cache-dir --no-deps .
+
+# Set ownership
+RUN chown -R appuser:appuser /app
 
 # Switch to non-root user
 USER appuser
