@@ -62,12 +62,22 @@ def parse_ingame_time(ingame_time: str) -> tuple[int, int, int] | None:
             return None
 
         day = int(parts[0].strip())
+        # Validate day is within reasonable bounds (1-9999)
+        if day < 1 or day > 9999:
+            return None
+
         time_parts = parts[1].split(":")
         if len(time_parts) != 2:
             return None
 
         hour = int(time_parts[0])
         minute = int(time_parts[1])
+
+        # Validate hour (0-23) and minute (0-59) ranges
+        if not (0 <= hour <= 23):
+            return None
+        if not (0 <= minute <= 59):
+            return None
 
         return day, hour, minute
     except (ValueError, IndexError):
@@ -379,8 +389,22 @@ class VerificationService:
         Args:
             image (cv2.typing.MatLike): Original image.
             regions (ImageRegions): Region coordinates.
-            filename (str): Output filename.
+            filename (str): Output filename (must be alphanumeric with underscores/hyphens).
         """
+        # Sanitize filename to prevent path traversal
+        safe_filename = os.path.basename(filename)
+        # Only allow alphanumeric, underscores, hyphens, and dots
+        if not re.match(r"^[\w\-\.]+$", safe_filename):
+            logger.warning(f"Invalid debug filename rejected: {filename}")
+            return
+
+        # Verify output path is within debug directory
+        debug_dir = os.path.realpath(self.settings.ocr.debug_output_dir)
+        output_path = os.path.realpath(os.path.join(debug_dir, safe_filename))
+        if not output_path.startswith(debug_dir + os.sep):
+            logger.warning(f"Path traversal attempt rejected: {filename}")
+            return
+
         debug_img = image.copy()
         scale = regions.scale_factor
         thickness = max(1, int(2 * scale))
@@ -480,7 +504,6 @@ class VerificationService:
             thickness=thickness,
         )
 
-        output_path = os.path.join(self.settings.ocr.debug_output_dir, filename)
         cv2.imwrite(filename=output_path, img=debug_img)
         logger.info(f"Debug image saved to {output_path}")
 
@@ -646,85 +669,113 @@ class VerificationService:
         """
         logger.info("Processing image pair for verification")
 
-        # Decode images
-        images: list[MatLike | None] = []
-        for img_bytes in [image1_bytes, image2_bytes]:
-            nparr = np.frombuffer(buffer=img_bytes, dtype=np.uint8)
-            img = cv2.imdecode(buf=nparr, flags=cv2.IMREAD_COLOR)
-            images.append(img)
+        try:
+            # Decode images
+            images: list[MatLike | None] = []
+            for img_bytes in [image1_bytes, image2_bytes]:
+                nparr = np.frombuffer(buffer=img_bytes, dtype=np.uint8)
+                img = cv2.imdecode(buf=nparr, flags=cv2.IMREAD_COLOR)
+                images.append(img)
 
-        # Check if images were decoded successfully
-        if images[0] is None or images[1] is None:
-            return VerificationResponse(
-                success=False,
-                error="Failed to decode one or both images",
-            )
-
-        # Calculate regions for both images
-        regions1 = self._calculate_regions(images[0])
-        regions2 = self._calculate_regions(images[1])
-
-        # Save debug images if debug mode is enabled
-        if self.settings.ocr.debug_mode:
-            self._save_debug_image(
-                image=images[0],
-                regions=regions1,
-                filename="debug_image1_regions.png",
-            )
-            self._save_debug_image(
-                image=images[1],
-                regions=regions2,
-                filename="debug_image2_regions.png",
-            )
-
-        # Try to find user info in first image, fallback to second
-        verification = self._find_user_info(image=images[0], regions=regions1)
-        if verification.name is None:
-            verification = self._find_user_info(image=images[1], regions=regions2)
-            shard, ingame_time = self._get_shard_and_time(
-                image=images[0],
-                regions=regions1,
-            )
-        else:
-            shard, ingame_time = self._get_shard_and_time(
-                image=images[1],
-                regions=regions2,
-            )
-
-        verification.shard = shard
-        verification.ingame_time = ingame_time
-
-        if verification.name is None:
-            return VerificationResponse(
-                success=False,
-                error="No name found in any of the images",
-            )
-
-        # Validate in-game time difference
-        if ingame_time is not None:
-            parsed_time = parse_ingame_time(ingame_time=ingame_time)
-            current_time = get_current_ingame_time()
-
-            if parsed_time is not None and current_time is not None:
-                time_diff = calculate_ingame_time_diff(
-                    extracted_day=parsed_time[0],
-                    extracted_hour=parsed_time[1],
-                    current_day=current_time[0],
-                    current_hour=current_time[1],
+            # Check if images were decoded successfully
+            if images[0] is None or images[1] is None:
+                return VerificationResponse(
+                    success=False,
+                    error="Failed to decode one or both images",
                 )
 
-                max_diff = self.settings.verification.max_ingame_time_diff
-                if time_diff > max_diff:
+            # Validate minimum image dimensions
+            for i, img in enumerate(images):
+                if img.shape[0] < 100 or img.shape[1] < 100:
                     return VerificationResponse(
                         success=False,
-                        error=(
-                            f"In-game time difference is {time_diff} hours "
-                            f"(max allowed: {max_diff})"
-                        ),
-                        verification=verification,
+                        error=f"Image {i + 1} is too small (minimum 100x100 pixels)",
                     )
 
-        return VerificationResponse(
-            success=True,
-            verification=verification,
-        )
+            # Calculate regions for both images
+            regions1 = self._calculate_regions(images[0])
+            regions2 = self._calculate_regions(images[1])
+
+            # Save debug images if debug mode is enabled
+            if self.settings.ocr.debug_mode:
+                self._save_debug_image(
+                    image=images[0],
+                    regions=regions1,
+                    filename="debug_image1_regions.png",
+                )
+                self._save_debug_image(
+                    image=images[1],
+                    regions=regions2,
+                    filename="debug_image2_regions.png",
+                )
+
+            # Try to find user info in first image, fallback to second
+            verification = self._find_user_info(image=images[0], regions=regions1)
+            if verification.name is None:
+                verification = self._find_user_info(image=images[1], regions=regions2)
+                shard, ingame_time = self._get_shard_and_time(
+                    image=images[0],
+                    regions=regions1,
+                )
+            else:
+                shard, ingame_time = self._get_shard_and_time(
+                    image=images[1],
+                    regions=regions2,
+                )
+
+            verification.shard = shard
+            verification.ingame_time = ingame_time
+
+            if verification.name is None:
+                return VerificationResponse(
+                    success=False,
+                    error="No name found in any of the images",
+                )
+
+            # Validate in-game time difference
+            if ingame_time is not None:
+                parsed_time = parse_ingame_time(ingame_time=ingame_time)
+                current_time = get_current_ingame_time()
+
+                if parsed_time is not None and current_time is not None:
+                    time_diff = calculate_ingame_time_diff(
+                        extracted_day=parsed_time[0],
+                        extracted_hour=parsed_time[1],
+                        current_day=current_time[0],
+                        current_hour=current_time[1],
+                    )
+
+                    max_diff = self.settings.verification.max_ingame_time_diff
+                    if time_diff > max_diff:
+                        return VerificationResponse(
+                            success=False,
+                            error=(
+                                f"In-game time difference is {time_diff} hours "
+                                f"(max allowed: {max_diff})"
+                            ),
+                            verification=verification,
+                        )
+
+            return VerificationResponse(
+                success=True,
+                verification=verification,
+            )
+
+        except cv2.error as e:
+            logger.error(f"OpenCV error during verification: {e}")
+            return VerificationResponse(
+                success=False,
+                error="Image processing error",
+            )
+        except pytesseract.TesseractError as e:
+            logger.error(f"Tesseract OCR error: {e}")
+            return VerificationResponse(
+                success=False,
+                error="OCR processing error",
+            )
+        except Exception as e:
+            logger.exception(f"Unexpected error during verification: {e}")
+            return VerificationResponse(
+                success=False,
+                error="Internal processing error",
+            )

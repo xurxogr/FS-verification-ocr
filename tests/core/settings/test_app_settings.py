@@ -3,6 +3,8 @@
 import os
 from unittest.mock import patch
 
+import pytest
+
 from verification_ocr.core.settings.app_settings import (
     APIServerSettings,
     AppSettings,
@@ -22,7 +24,7 @@ class TestAPIServerSettings:
 
         """
         settings = APIServerSettings()
-        assert settings.host == "0.0.0.0"
+        assert settings.host == "127.0.0.1"
 
     def test_default_port(self) -> None:
         """
@@ -42,11 +44,11 @@ class TestAPIServerSettings:
 
     def test_default_cors_allow_origins(self) -> None:
         """
-        Test default CORS allow origins.
+        Test default CORS allow origins (empty for security).
 
         """
         settings = APIServerSettings()
-        assert settings.cors_allow_origins == ["*"]
+        assert settings.cors_allow_origins == []
 
     def test_custom_values(self) -> None:
         """
@@ -149,13 +151,46 @@ class TestOCRSettings:
         assert settings.debug_mode is False
         assert settings.debug_output_dir == "screenshots"
 
-    def test_custom_tesseract_cmd(self) -> None:
+    def test_custom_tesseract_cmd_valid_path(self) -> None:
         """
-        Test custom tesseract_cmd.
+        Test custom tesseract_cmd with valid path.
 
         """
-        settings = OCRSettings(tesseract_cmd="/custom/tesseract")
-        assert settings.tesseract_cmd == "/custom/tesseract"
+        import shutil
+
+        # Use the real tesseract path if available
+        tesseract_path = shutil.which("tesseract")
+        if tesseract_path:
+            settings = OCRSettings(tesseract_cmd=tesseract_path)
+            assert settings.tesseract_cmd == tesseract_path
+        else:
+            # Skip test if tesseract not installed
+            pytest.skip("Tesseract not installed")
+
+    def test_custom_tesseract_cmd_invalid_path_raises(self) -> None:
+        """
+        Test custom tesseract_cmd with invalid path raises error.
+
+        """
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError, match="Tesseract binary not found"):
+            OCRSettings(tesseract_cmd="/nonexistent/tesseract")
+
+    def test_custom_tesseract_cmd_not_executable_raises(self, tmp_path) -> None:
+        """
+        Test custom tesseract_cmd raises error if file exists but is not executable.
+
+        """
+        from pydantic import ValidationError
+
+        # Create a file that exists but is not executable
+        non_exec_file = tmp_path / "tesseract"
+        non_exec_file.write_text("not executable")
+        non_exec_file.chmod(0o644)  # Read/write but not execute
+
+        with pytest.raises(ValidationError, match="Tesseract binary not executable"):
+            OCRSettings(tesseract_cmd=str(non_exec_file))
 
     def test_custom_language(self) -> None:
         """
@@ -165,13 +200,46 @@ class TestOCRSettings:
         settings = OCRSettings(language="spa")
         assert settings.language == "spa"
 
-    def test_custom_colonial_icon_path(self) -> None:
+    def test_empty_language_raises(self) -> None:
         """
-        Test custom colonial_icon_path.
+        Test that empty language string raises validation error.
 
         """
-        settings = OCRSettings(colonial_icon_path="/path/to/icon.png")
-        assert settings.colonial_icon_path == "/path/to/icon.png"
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError, match="Language string cannot be empty"):
+            OCRSettings(language="")
+
+    def test_whitespace_only_language_raises(self) -> None:
+        """
+        Test that whitespace-only language string raises validation error.
+
+        """
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError, match="Language string cannot be empty"):
+            OCRSettings(language="   ")
+
+    def test_custom_colonial_icon_path_nonexistent_returns_none(self) -> None:
+        """
+        Test custom colonial_icon_path returns None if file doesn't exist.
+
+        """
+        settings = OCRSettings(colonial_icon_path="/path/to/nonexistent/icon.png")
+        # Validator returns None for non-existent paths (icon is optional)
+        assert settings.colonial_icon_path is None
+
+    def test_custom_colonial_icon_path_valid(self, tmp_path) -> None:
+        """
+        Test custom colonial_icon_path with valid file.
+
+        """
+        # Create a temporary file
+        icon_file = tmp_path / "icon.png"
+        icon_file.write_bytes(b"fake image data")
+
+        settings = OCRSettings(colonial_icon_path=str(icon_file))
+        assert settings.colonial_icon_path == str(icon_file)
 
 
 class TestWarSettings:

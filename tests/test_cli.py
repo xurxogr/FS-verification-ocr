@@ -143,8 +143,8 @@ class TestRunServer:
             run_server(args)
 
             call_kwargs = mock_uvicorn.call_args[1]
-            # Default from settings is 0.0.0.0
-            assert call_kwargs["host"] == "0.0.0.0"
+            # Default from settings is 127.0.0.1 (secure default)
+            assert call_kwargs["host"] == "127.0.0.1"
 
     def test_run_server_uses_default_port_from_settings(self) -> None:
         """

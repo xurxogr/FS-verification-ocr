@@ -27,7 +27,9 @@ def mock_settings() -> AppSettings:
             host="127.0.0.1",
             port=8000,
             workers=1,
-            cors_allow_origins=["*"],
+            cors_allow_origins=["http://localhost:3000"],
+            max_upload_size=50 * 1024 * 1024,
+            rate_limit="100/minute",
         ),
         ocr=OCRSettings(
             tesseract_cmd=None,

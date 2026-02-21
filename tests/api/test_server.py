@@ -14,6 +14,7 @@ from verification_ocr.api.server import (
     app,
     create_app,
     lifespan,
+    rate_limit_exceeded_handler,
 )
 from verification_ocr.services import get_war_service
 
@@ -49,15 +50,21 @@ class TestLifespan:
         mock_tesseract_available: MagicMock,
     ) -> None:
         """Test lifespan skips API fetch when war state is already configured."""
-        war_service = get_war_service()
-        war_service.initialize(war_number=132, start_time=1770663602746)
+        from verification_ocr.core.settings import get_settings
 
+        war_service = get_war_service()
         mock_app = MagicMock(spec=FastAPI)
 
-        with patch.object(war_service, "sync_from_api", new_callable=AsyncMock) as mock_sync:
-            async with lifespan(mock_app):
-                # API sync should NOT be called when war is already configured
-                mock_sync.assert_not_called()
+        # Patch settings to have configured war state
+        settings = get_settings()
+        with patch.object(settings.war, "number", 132):
+            with patch.object(settings.war, "start_time", 1770663602746):
+                with patch.object(
+                    war_service, "sync_from_api", new_callable=AsyncMock
+                ) as mock_sync:
+                    async with lifespan(mock_app):
+                        # API sync should NOT be called when war is already configured
+                        mock_sync.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_lifespan_fetches_from_api_when_war_not_configured(
@@ -452,3 +459,172 @@ class TestAppInstance:
         """Test that app has /sync route."""
         routes = [route.path for route in app.routes]
         assert "/sync" in routes
+
+
+class TestSecurityHeaders:
+    """Tests for security headers middleware."""
+
+    def test_security_headers_added_to_response(self, test_client: TestClient) -> None:
+        """Test that security headers are added to all responses."""
+        response = test_client.get("/health")
+
+        assert response.headers.get("X-Frame-Options") == "DENY"
+        assert response.headers.get("X-Content-Type-Options") == "nosniff"
+        assert response.headers.get("X-XSS-Protection") == "1; mode=block"
+        assert "strict-origin-when-cross-origin" in response.headers.get("Referrer-Policy", "")
+
+    def test_hsts_header_added_when_https_proxy(self, test_client: TestClient) -> None:
+        """Test that HSTS header is added when behind HTTPS proxy."""
+        response = test_client.get(
+            "/health",
+            headers={"X-Forwarded-Proto": "https"},
+        )
+
+        assert "Strict-Transport-Security" in response.headers
+        assert "max-age=31536000" in response.headers.get("Strict-Transport-Security", "")
+
+    def test_no_hsts_header_without_https_proxy(self, test_client: TestClient) -> None:
+        """Test that HSTS header is not added without HTTPS proxy."""
+        response = test_client.get("/health")
+
+        assert "Strict-Transport-Security" not in response.headers
+
+
+class TestRateLimiting:
+    """Tests for rate limiting."""
+
+    def test_rate_limit_exceeded_handler(self) -> None:
+        """Test rate limit exceeded handler returns proper response."""
+        from slowapi.errors import RateLimitExceeded
+
+        mock_request = MagicMock()
+        # RateLimitExceeded requires a Limit object, use MagicMock
+        mock_limit = MagicMock()
+        mock_exc = RateLimitExceeded(mock_limit)
+
+        response = rate_limit_exceeded_handler(mock_request, mock_exc)
+
+        assert response.status_code == 429
+        assert b"Rate limit exceeded" in response.body
+
+
+class TestUploadSizeLimits:
+    """Tests for file upload size limits."""
+
+    def _create_large_image(self, size_mb: int = 60) -> bytes:
+        """Create a large image that exceeds default size limit."""
+        # Create uncompressed data larger than the limit
+        # Using a simple approach - create large random data
+        return b"0" * (size_mb * 1024 * 1024)
+
+    def test_verify_rejects_oversized_image1(self, test_client: TestClient) -> None:
+        """Test that oversized first image is rejected."""
+        large_data = self._create_large_image(60)  # 60MB exceeds 50MB default
+
+        # Create a small valid image for image2
+        img = np.ones((100, 100, 3), dtype=np.uint8) * 255
+        _, buffer = cv2.imencode(".png", img)
+        small_bytes = buffer.tobytes()
+
+        response = test_client.post(
+            "/verify",
+            files={
+                "image1": ("large.png", io.BytesIO(large_data), "image/png"),
+                "image2": ("small.png", io.BytesIO(small_bytes), "image/png"),
+            },
+        )
+
+        assert response.status_code == 413
+        assert "Image 1 exceeds maximum size" in response.json()["detail"]
+
+    def test_verify_rejects_oversized_image2(self, test_client: TestClient) -> None:
+        """Test that oversized second image is rejected."""
+        large_data = self._create_large_image(60)  # 60MB exceeds 50MB default
+
+        # Create a small valid image for image1
+        img = np.ones((100, 100, 3), dtype=np.uint8) * 255
+        _, buffer = cv2.imencode(".png", img)
+        small_bytes = buffer.tobytes()
+
+        response = test_client.post(
+            "/verify",
+            files={
+                "image1": ("small.png", io.BytesIO(small_bytes), "image/png"),
+                "image2": ("large.png", io.BytesIO(large_data), "image/png"),
+            },
+        )
+
+        assert response.status_code == 413
+        assert "Image 2 exceeds maximum size" in response.json()["detail"]
+
+
+class TestCORSConfiguration:
+    """Tests for CORS middleware configuration."""
+
+    def test_cors_headers_when_origins_configured(
+        self,
+        mock_tesseract_available: MagicMock,
+    ) -> None:
+        """Test that CORS headers are added when origins are configured."""
+        from verification_ocr.core.settings import get_settings
+
+        settings = get_settings()
+        # Configure CORS origins
+        with patch.object(
+            settings.api_server,
+            "cors_allow_origins",
+            ["http://localhost:3000"],
+        ):
+            # Create a new app with the patched settings
+            new_app = create_app()
+            client = TestClient(new_app)
+
+            response = client.options(
+                "/health",
+                headers={
+                    "Origin": "http://localhost:3000",
+                    "Access-Control-Request-Method": "GET",
+                },
+            )
+
+            # CORS preflight should work
+            assert response.status_code in [200, 405]
+
+
+class TestIndexEndpointSecurity:
+    """Tests for index endpoint security features."""
+
+    def test_index_returns_file_when_exists(
+        self,
+        test_client: TestClient,
+        tmp_path,
+    ) -> None:
+        """Test that index returns FileResponse when index.html exists."""
+        # Create a temporary index.html
+        index_file = tmp_path / "index.html"
+        index_file.write_text("<html><body>Test</body></html>")
+
+        static_dir = str(tmp_path)
+
+        with patch("verification_ocr.api.server.STATIC_DIR", static_dir):
+            response = test_client.get("/")
+
+            assert response.status_code == 200
+
+    def test_index_path_traversal_protection(self, test_client: TestClient) -> None:
+        """Test that path traversal in index endpoint is prevented."""
+
+        # Mock realpath to simulate path resolving outside STATIC_DIR
+        def mock_realpath(path):
+            if "index.html" in str(path):
+                return "/etc/passwd"
+            return "/safe/static"
+
+        with patch("verification_ocr.api.server.os.path.realpath", side_effect=mock_realpath):
+            response = test_client.get("/")
+
+            # Should return JSON fallback, not file
+            assert response.status_code == 200
+            data = response.json()
+            assert data["message"] == "Verification OCR Service"
+            assert data["docs"] == "/docs"

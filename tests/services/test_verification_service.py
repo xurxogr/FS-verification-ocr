@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 import cv2
 import numpy as np
+import pytesseract
 
 from verification_ocr.core.settings import AppSettings
 from verification_ocr.models import ImageRegions, Region
@@ -178,6 +179,44 @@ class TestParseIngameTime:
 
         """
         result = parse_ingame_time("abc, de:fg")
+        assert result is None
+
+    def test_returns_none_for_day_less_than_one(self) -> None:
+        """
+        Test returns None when day is less than 1.
+
+        """
+        result = parse_ingame_time("0, 12:30")
+        assert result is None
+
+    def test_returns_none_for_day_greater_than_9999(self) -> None:
+        """
+        Test returns None when day exceeds 9999.
+
+        """
+        result = parse_ingame_time("10000, 12:30")
+        assert result is None
+
+    def test_returns_none_for_hour_out_of_range(self) -> None:
+        """
+        Test returns None when hour is outside 0-23 range.
+
+        """
+        result = parse_ingame_time("267, 24:30")
+        assert result is None
+
+        result = parse_ingame_time("267, 25:30")
+        assert result is None
+
+    def test_returns_none_for_minute_out_of_range(self) -> None:
+        """
+        Test returns None when minute is outside 0-59 range.
+
+        """
+        result = parse_ingame_time("267, 12:60")
+        assert result is None
+
+        result = parse_ingame_time("267, 12:99")
         assert result is None
 
 
@@ -636,6 +675,115 @@ class TestVerificationServiceSaveDebugImage:
         )
 
         assert os.path.exists(tmp_path / "test_debug.png")
+
+    def test_save_debug_image_rejects_invalid_filename(
+        self,
+        mock_settings: AppSettings,
+        tmp_path,
+    ) -> None:
+        """
+        Test that invalid filenames are rejected.
+
+        Args:
+            mock_settings (AppSettings): Mock settings fixture.
+            tmp_path: Pytest temporary path fixture.
+
+        """
+        mock_settings.ocr.debug_mode = True
+        mock_settings.ocr.debug_output_dir = str(tmp_path)
+
+        img = np.ones((500, 500, 3), dtype=np.uint8) * 255
+        service = VerificationService(mock_settings)
+        regions = service._calculate_regions(img)
+
+        # Filename with special characters should be rejected
+        service._save_debug_image(
+            image=img,
+            regions=regions,
+            filename="test<>debug.png",
+        )
+
+        # File should not be created
+        assert not os.path.exists(tmp_path / "test<>debug.png")
+
+    def test_save_debug_image_strips_path_components(
+        self,
+        mock_settings: AppSettings,
+        tmp_path,
+    ) -> None:
+        """
+        Test that path components are stripped from filename.
+
+        Args:
+            mock_settings (AppSettings): Mock settings fixture.
+            tmp_path: Pytest temporary path fixture.
+
+        """
+        mock_settings.ocr.debug_mode = True
+        mock_settings.ocr.debug_output_dir = str(tmp_path)
+
+        img = np.ones((500, 500, 3), dtype=np.uint8) * 255
+        service = VerificationService(mock_settings)
+        regions = service._calculate_regions(img)
+
+        # Path traversal attempt - basename strips path, file saved safely in debug dir
+        service._save_debug_image(
+            image=img,
+            regions=regions,
+            filename="../../../safe_file.png",
+        )
+
+        # File should be created in debug dir (path components stripped)
+        assert os.path.exists(tmp_path / "safe_file.png")
+        # File should NOT be created outside debug dir
+        assert not os.path.exists(tmp_path.parent / "safe_file.png")
+
+    def test_save_debug_image_rejects_symlink_traversal(
+        self,
+        mock_settings: AppSettings,
+        tmp_path,
+    ) -> None:
+        """
+        Test that symlink-based path traversal is rejected.
+
+        Args:
+            mock_settings (AppSettings): Mock settings fixture.
+            tmp_path: Pytest temporary path fixture.
+
+        """
+        # Create debug dir inside tmp_path
+        debug_dir = tmp_path / "debug"
+        debug_dir.mkdir()
+
+        # Create a target directory outside debug_dir
+        outside_dir = tmp_path / "outside"
+        outside_dir.mkdir()
+
+        mock_settings.ocr.debug_mode = True
+        mock_settings.ocr.debug_output_dir = str(debug_dir)
+
+        img = np.ones((500, 500, 3), dtype=np.uint8) * 255
+        service = VerificationService(mock_settings)
+        regions = service._calculate_regions(img)
+
+        # Mock os.path.realpath to simulate a symlink resolving outside
+        with patch("os.path.realpath") as mock_realpath:
+            # First call for debug_dir returns actual path
+            # Second call for output_path returns path outside debug_dir
+            mock_realpath.side_effect = [
+                str(debug_dir),
+                str(outside_dir / "evil.png"),
+            ]
+
+            service._save_debug_image(
+                image=img,
+                regions=regions,
+                filename="evil.png",
+            )
+
+            # File should NOT be created (path traversal rejected)
+            assert not os.path.exists(outside_dir / "evil.png")
+            assert not os.path.exists(debug_dir / "evil.png")
 
 
 class TestVerificationServicePrepareImageForShardDetection:
@@ -1442,3 +1590,112 @@ class TestVerificationServiceIntegration:
         assert result.success is True
         # Warden user is not in a regiment - regiment is None
         assert result.verification.regiment is None
+
+    def test_verify_returns_error_for_too_small_image(
+        self,
+        mock_settings: AppSettings,
+    ) -> None:
+        """
+        Test that error is returned when image is too small.
+
+        Args:
+            mock_settings (AppSettings): Mock settings fixture.
+
+        """
+        # Create a tiny image (50x50, below 100x100 minimum)
+        tiny_img = np.ones((50, 50, 3), dtype=np.uint8) * 255
+        _, buffer = cv2.imencode(".png", tiny_img)
+        tiny_bytes = buffer.tobytes()
+
+        # Create a valid sized image
+        valid_img = np.ones((500, 500, 3), dtype=np.uint8) * 255
+        _, valid_buffer = cv2.imencode(".png", valid_img)
+        valid_bytes = valid_buffer.tobytes()
+
+        service = VerificationService(mock_settings)
+
+        # Test first image too small
+        result = service.verify(tiny_bytes, valid_bytes)
+        assert result.success is False
+        assert "too small" in result.error
+        assert "Image 1" in result.error
+
+        # Test second image too small
+        result = service.verify(valid_bytes, tiny_bytes)
+        assert result.success is False
+        assert "too small" in result.error
+        assert "Image 2" in result.error
+
+    def test_verify_handles_opencv_error(
+        self,
+        mock_settings: AppSettings,
+    ) -> None:
+        """
+        Test that OpenCV errors are handled gracefully.
+
+        Args:
+            mock_settings (AppSettings): Mock settings fixture.
+
+        """
+        img = np.ones((500, 500, 3), dtype=np.uint8) * 255
+        _, buffer = cv2.imencode(".png", img)
+        image_bytes = buffer.tobytes()
+
+        service = VerificationService(mock_settings)
+
+        with patch.object(
+            service, "_calculate_regions", side_effect=cv2.error("Test OpenCV error")
+        ):
+            result = service.verify(image_bytes, image_bytes)
+            assert result.success is False
+            assert result.error == "Image processing error"
+
+    def test_verify_handles_tesseract_error(
+        self,
+        mock_settings: AppSettings,
+    ) -> None:
+        """
+        Test that Tesseract errors are handled gracefully.
+
+        Args:
+            mock_settings (AppSettings): Mock settings fixture.
+
+        """
+        img = np.ones((500, 500, 3), dtype=np.uint8) * 255
+        _, buffer = cv2.imencode(".png", img)
+        image_bytes = buffer.tobytes()
+
+        service = VerificationService(mock_settings)
+
+        with patch.object(
+            service,
+            "_find_user_info",
+            side_effect=pytesseract.TesseractError("Tesseract failed", 1),
+        ):
+            result = service.verify(image_bytes, image_bytes)
+            assert result.success is False
+            assert result.error == "OCR processing error"
+
+    def test_verify_handles_unexpected_exception(
+        self,
+        mock_settings: AppSettings,
+    ) -> None:
+        """
+        Test that unexpected exceptions are handled gracefully.
+
+        Args:
+            mock_settings (AppSettings): Mock settings fixture.
+
+        """
+        img = np.ones((500, 500, 3), dtype=np.uint8) * 255
+        _, buffer = cv2.imencode(".png", img)
+        image_bytes = buffer.tobytes()
+
+        service = VerificationService(mock_settings)
+
+        with patch.object(
+            service, "_calculate_regions", side_effect=RuntimeError("Unexpected error")
+        ):
+            result = service.verify(image_bytes, image_bytes)
+            assert result.success is False
+            assert result.error == "Internal processing error"

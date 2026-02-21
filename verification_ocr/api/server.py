@@ -5,10 +5,14 @@ import os
 from contextlib import asynccontextmanager
 from typing import Annotated, Any
 
-from fastapi import Depends, FastAPI, File, UploadFile
+from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
+from slowapi import Limiter
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from verification_ocr import __version__
 from verification_ocr.api.dependencies import get_verification_service
@@ -20,6 +24,36 @@ from verification_ocr.services import VerificationService, get_war_service
 logger = logging.getLogger(__name__)
 
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "static")
+
+# Rate limiter instance
+limiter = Limiter(key_func=get_remote_address)
+
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """Middleware to add security headers to all responses."""
+
+    async def dispatch(self, request: Request, call_next) -> Response:
+        """Add security headers to response."""
+        response = await call_next(request)
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-XSS-Protection"] = "1; mode=block"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+        # Only add HSTS if behind HTTPS proxy (check X-Forwarded-Proto)
+        if request.headers.get("X-Forwarded-Proto") == "https":
+            response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        return response
+
+
+def rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded) -> Response:
+    """Handle rate limit exceeded errors."""
+    from fastapi.responses import JSONResponse
+
+    return JSONResponse(
+        status_code=429,
+        content={"detail": "Rate limit exceeded. Please try again later."},
+    )
 
 
 @asynccontextmanager
@@ -92,14 +126,22 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    # CORS middleware
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=settings.api_server.cors_allow_origins,
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+    # Add rate limiter state and exception handler
+    app.state.limiter = limiter
+    app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
+
+    # Security headers middleware
+    app.add_middleware(SecurityHeadersMiddleware)
+
+    # CORS middleware - only add if origins are specified
+    if settings.api_server.cors_allow_origins:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=settings.api_server.cors_allow_origins,
+            allow_credentials=True,
+            allow_methods=["GET", "POST"],
+            allow_headers=["*"],
+        )
 
     # Mount static files for frontend
     if os.path.exists(STATIC_DIR):
@@ -118,7 +160,10 @@ async def index() -> FileResponse | dict[str, str]:
 
         FileResponse | dict[str, str]: The index.html file or a JSON message with docs link.
     """
-    index_path = os.path.join(STATIC_DIR, "index.html")
+    index_path = os.path.realpath(os.path.join(STATIC_DIR, "index.html"))
+    # Ensure path is within STATIC_DIR (prevent path traversal)
+    if not index_path.startswith(os.path.realpath(STATIC_DIR)):
+        return {"message": "Verification OCR Service", "docs": "/docs"}
     if os.path.exists(index_path):
         return FileResponse(index_path)
     return {"message": "Verification OCR Service", "docs": "/docs"}
@@ -195,7 +240,9 @@ async def sync_war() -> dict[str, Any]:
 
 
 @app.post("/verify", response_model=VerificationResponse)
+@limiter.limit(lambda: get_settings().api_server.rate_limit)
 async def verify_images(
+    request: Request,
     image1: Annotated[UploadFile, File(description="First image")],
     image2: Annotated[UploadFile, File(description="Second image")],
     service: Annotated[VerificationService, Depends(get_verification_service)],
@@ -207,15 +254,30 @@ async def verify_images(
     faction, shard) using OCR and template matching.
 
     Args:
+        request (Request): The request object (required for rate limiting).
         image1 (UploadFile): First screenshot (profile or map).
         image2 (UploadFile): Second screenshot (profile or map).
         service (VerificationService): Injected verification service.
 
         VerificationResponse: Verification result with user info or error.
     """
-    # Read image bytes
+    settings = get_settings()
+    max_size = settings.api_server.max_upload_size
+
+    # Read and validate image sizes
     image1_bytes = await image1.read()
+    if len(image1_bytes) > max_size:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Image 1 exceeds maximum size of {max_size // (1024 * 1024)}MB",
+        )
+
     image2_bytes = await image2.read()
+    if len(image2_bytes) > max_size:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Image 2 exceeds maximum size of {max_size // (1024 * 1024)}MB",
+        )
 
     # Process and compare
     return service.verify(
