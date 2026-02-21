@@ -1063,36 +1063,32 @@ class TestVerificationServiceVerify:
         with pytest.raises(ValueError, match="Failed to decode"):
             service.verify(invalid_image_bytes, invalid_image_bytes)
 
-    def test_verify_raises_error_when_no_name_found(
+    def test_verify_raises_error_when_no_faction_found(
         self,
         mock_settings: AppSettings,
     ) -> None:
         """
-        Test that ValueError is raised when no name is found in either image.
+        Test that ValueError is raised when no faction icon is found in either image.
 
         Args:
             mock_settings (AppSettings): Mock settings fixture.
 
         """
-        # Create a larger test image (small images cause empty regions)
         img = np.ones((500, 500, 3), dtype=np.uint8) * 255
         _, buffer = cv2.imencode(".png", img)
         image_bytes = buffer.tobytes()
 
-        with patch(
-            "verification_ocr.services.verification_service.pytesseract.image_to_string",
-            return_value="",
-        ):
-            service = VerificationService(mock_settings)
-            with pytest.raises(ValueError, match="No player name found in either image"):
-                service.verify(image_bytes, image_bytes)
+        service = VerificationService(mock_settings)
+        # No faction icons loaded, so detection will return None
+        with pytest.raises(ValueError, match="Could not detect faction icon in either image"):
+            service.verify(image_bytes, image_bytes)
 
-    def test_verify_raises_error_when_both_images_have_names(
+    def test_verify_raises_error_when_both_images_have_faction(
         self,
         mock_settings: AppSettings,
     ) -> None:
         """
-        Test that ValueError is raised when both images contain player names.
+        Test that ValueError is raised when both images contain faction icons.
 
         Args:
             mock_settings (AppSettings): Mock settings fixture.
@@ -1106,35 +1102,18 @@ class TestVerificationServiceVerify:
         _, buffer2 = cv2.imencode(".png", img2)
         image2_bytes = buffer2.tobytes()
 
-        call_count = [0]
-
-        def mock_ocr(*args: Any, **kwargs: Any) -> str:
-            call_count[0] += 1
-            # Both images return a name
-            if call_count[0] == 1:
-                return "Player1"  # img1 username
-            if call_count[0] == 2:
-                return "Level: 25"  # img1 level
-            if call_count[0] == 3:
-                return ""  # img1 regiment
-            if call_count[0] == 4:
-                return "Player2"  # img2 username - also has name!
-            return ""
-
-        with patch(
-            "verification_ocr.services.verification_service.pytesseract.image_to_string",
-            side_effect=mock_ocr,
-        ):
-            service = VerificationService(mock_settings)
-            with pytest.raises(ValueError, match="Both images contain player names"):
+        service = VerificationService(mock_settings)
+        # Mock faction detection to return faction for both images
+        with patch.object(service, "_detect_faction", return_value=Faction.COLONIAL):
+            with pytest.raises(ValueError, match="Both images contain faction icons"):
                 service.verify(image1_bytes, image2_bytes)
 
-    def test_verify_raises_error_when_no_faction_detected(
+    def test_verify_raises_error_when_no_name_in_profile(
         self,
         mock_settings: AppSettings,
     ) -> None:
         """
-        Test that ValueError is raised when no faction icon is detected.
+        Test that ValueError is raised when no name is found in the profile image.
 
         Args:
             mock_settings (AppSettings): Mock settings fixture.
@@ -1148,30 +1127,21 @@ class TestVerificationServiceVerify:
         _, shard_buffer = cv2.imencode(".png", shard_img)
         shard_bytes = shard_buffer.tobytes()
 
-        call_count = [0]
-
-        def mock_ocr(*args: Any, **kwargs: Any) -> str:
-            call_count[0] += 1
-            if call_count[0] == 1:
-                return "TestPlayer"  # img1 username
-            if call_count[0] == 2:
-                return "Level: 25"  # img1 level
-            if call_count[0] == 3:
-                return ""  # img1 regiment
-            if call_count[0] == 4:
-                return ""  # img2 username - no name
-            if call_count[0] == 5:
-                return ""  # img1 shard
-            return "100, 1200\nABLE"  # img2 shard
-
+        # OCR returns empty for username
         with patch(
             "verification_ocr.services.verification_service.pytesseract.image_to_string",
-            side_effect=mock_ocr,
+            return_value="",
         ):
             service = VerificationService(mock_settings)
-            # Mock faction detection to return None (no faction detected)
-            with patch.object(service, "_detect_faction", return_value=None):
-                with pytest.raises(ValueError, match="Could not detect faction"):
+            # Mock: first image has faction (profile), second doesn't (shard)
+            faction_call_count = [0]
+
+            def mock_faction(img: Any) -> Faction | None:
+                faction_call_count[0] += 1
+                return Faction.COLONIAL if faction_call_count[0] == 1 else None
+
+            with patch.object(service, "_detect_faction", side_effect=mock_faction):
+                with pytest.raises(ValueError, match="No player name found in the profile image"):
                     service.verify(profile_bytes, shard_bytes)
 
     def test_verify_extracts_user_info(
@@ -1198,32 +1168,34 @@ class TestVerificationServiceVerify:
 
         def mock_ocr(*args: Any, **kwargs: Any) -> str:
             call_count[0] += 1
-            # img1 (profile): username, level, regiment
+            # Profile image: username, level, regiment
             if call_count[0] == 1:
-                return "TestPlayer"  # img1 username
+                return "TestPlayer"  # username
             if call_count[0] == 2:
-                return "Level: 25"  # img1 level
+                return "Level: 25"  # level
             if call_count[0] == 3:
-                return ""  # img1 regiment
-            # img2 (shard): username (returns empty = no name)
-            if call_count[0] == 4:
-                return ""  # img2 username - no name found
-            # shard extraction for both images
-            if call_count[0] == 5:
-                return ""  # img1 shard (profile has no shard)
-            return "100, 1200\nABLE"  # img2 shard
+                return ""  # regiment
+            # Shard extraction
+            return "100, 1200\nABLE"
 
         with patch(
             "verification_ocr.services.verification_service.pytesseract.image_to_string",
             side_effect=mock_ocr,
         ):
             service = VerificationService(mock_settings)
-            # Mock faction detection to return COLONIAL
-            with patch.object(service, "_detect_faction", return_value=Faction.COLONIAL):
+            # Mock: first image has faction (profile), second doesn't (shard)
+            faction_call_count = [0]
+
+            def mock_faction(img: Any) -> Faction | None:
+                faction_call_count[0] += 1
+                return Faction.COLONIAL if faction_call_count[0] == 1 else None
+
+            with patch.object(service, "_detect_faction", side_effect=mock_faction):
                 result = service.verify(profile_bytes, shard_bytes)
 
                 assert result.name == "TestPlayer"
                 assert result.level == 25
+                assert result.faction == Faction.COLONIAL
 
     def test_verify_handles_malformed_ocr_text(
         self,
@@ -1251,26 +1223,27 @@ class TestVerificationServiceVerify:
         def mock_ocr(*args: Any, **kwargs: Any) -> str:
             call_count[0] += 1
             if call_count[0] == 1:
-                return "TestPlayer"  # img1 username
+                return "TestPlayer"  # username
             if call_count[0] == 2:
-                return "Level abc"  # img1 level - no colon
+                return "Level abc"  # level - no colon
             if call_count[0] == 3:
-                return ""  # img1 regiment
-            if call_count[0] == 4:
-                return ""  # img2 username - no name
-            if call_count[0] == 5:
-                return ""  # img1 shard
-            return "100, 1200\nABLE"  # img2 shard
+                return ""  # regiment
+            return "100, 1200\nABLE"  # shard
 
         with patch(
             "verification_ocr.services.verification_service.pytesseract.image_to_string",
             side_effect=mock_ocr,
         ):
             service = VerificationService(mock_settings)
-            with patch.object(service, "_detect_faction", return_value=Faction.COLONIAL):
+            faction_call_count = [0]
+
+            def mock_faction(img: Any) -> Faction | None:
+                faction_call_count[0] += 1
+                return Faction.COLONIAL if faction_call_count[0] == 1 else None
+
+            with patch.object(service, "_detect_faction", side_effect=mock_faction):
                 result = service.verify(profile_bytes, shard_bytes)
 
-                # Should not crash - name extracted but level parsing failed gracefully
                 assert result.name == "TestPlayer"
                 assert result.level is None
 
@@ -1300,23 +1273,25 @@ class TestVerificationServiceVerify:
         def mock_ocr(*args: Any, **kwargs: Any) -> str:
             call_count[0] += 1
             if call_count[0] == 1:
-                return "TestPlayer"  # img1 username
+                return "TestPlayer"  # username
             if call_count[0] == 2:
-                return "Level: abc"  # img1 level - has colon but no digits
+                return "Level: abc"  # level - has colon but no digits
             if call_count[0] == 3:
-                return ""  # img1 regiment
-            if call_count[0] == 4:
-                return ""  # img2 username - no name
-            if call_count[0] == 5:
-                return ""  # img1 shard
-            return "100, 1200\nABLE"  # img2 shard
+                return ""  # regiment
+            return "100, 1200\nABLE"  # shard
 
         with patch(
             "verification_ocr.services.verification_service.pytesseract.image_to_string",
             side_effect=mock_ocr,
         ):
             service = VerificationService(mock_settings)
-            with patch.object(service, "_detect_faction", return_value=Faction.COLONIAL):
+            faction_call_count = [0]
+
+            def mock_faction(img: Any) -> Faction | None:
+                faction_call_count[0] += 1
+                return Faction.COLONIAL if faction_call_count[0] == 1 else None
+
+            with patch.object(service, "_detect_faction", side_effect=mock_faction):
                 result = service.verify(profile_bytes, shard_bytes)
 
                 assert result.name == "TestPlayer"
@@ -1356,9 +1331,10 @@ class TestVerificationServiceVerify:
         mock_settings: AppSettings,
     ) -> None:
         """
-        Test that user info is extracted from the correct image.
+        Test that user info is extracted from the image with faction icon.
 
-        When first image has no name, user info comes from second image.
+        When second image has faction, user info comes from second image
+        and shard info comes from first image.
 
         Args:
             mock_settings (AppSettings): Mock settings fixture.
@@ -1376,27 +1352,28 @@ class TestVerificationServiceVerify:
 
         def mock_ocr(*args: Any, **kwargs: Any) -> str:
             call_count[0] += 1
-            # img1 (shard): username only (returns empty)
+            # OCR is only called for: profile username, level, regiment, then shard
             if call_count[0] == 1:
-                return ""  # img1 has no name
-            # img2 (profile): username, level, regiment
+                return "SecondPlayer"  # profile username
             if call_count[0] == 2:
-                return "SecondPlayer"  # img2 username
+                return "Level: 30"  # profile level
             if call_count[0] == 3:
-                return "Level: 30"  # img2 level
-            if call_count[0] == 4:
-                return ""  # img2 regiment
-            # shard extraction
-            if call_count[0] == 5:
-                return "100, 1200\nABLE"  # img1 shard
-            return ""  # img2 shard
+                return ""  # profile regiment
+            return "100, 1200\nABLE"  # shard
 
         with patch(
             "verification_ocr.services.verification_service.pytesseract.image_to_string",
             side_effect=mock_ocr,
         ):
             service = VerificationService(mock_settings)
-            with patch.object(service, "_detect_faction", return_value=Faction.COLONIAL):
+            faction_call_count = [0]
+
+            def mock_faction(img: Any) -> Faction | None:
+                faction_call_count[0] += 1
+                # Second image (profile) has faction
+                return Faction.COLONIAL if faction_call_count[0] == 2 else None
+
+            with patch.object(service, "_detect_faction", side_effect=mock_faction):
                 result = service.verify(shard_bytes, profile_bytes)
 
                 assert result.name == "SecondPlayer"
@@ -1431,23 +1408,25 @@ class TestVerificationServiceVerify:
         def mock_ocr(*args: Any, **kwargs: Any) -> str:
             call_count[0] += 1
             if call_count[0] == 1:
-                return "TestPlayer"  # img1 username
+                return "TestPlayer"  # username
             if call_count[0] == 2:
-                return "Level: 25"  # img1 level
+                return "Level: 25"  # level
             if call_count[0] == 3:
-                return ""  # img1 regiment
-            if call_count[0] == 4:
-                return ""  # img2 username
-            if call_count[0] == 5:
-                return ""  # img1 shard
-            return "100, 1200\nABLE"  # img2 shard
+                return ""  # regiment
+            return "100, 1200\nABLE"  # shard
 
         with patch(
             "verification_ocr.services.verification_service.pytesseract.image_to_string",
             side_effect=mock_ocr,
         ):
             service = VerificationService(mock_settings)
-            with patch.object(service, "_detect_faction", return_value=Faction.COLONIAL):
+            faction_call_count = [0]
+
+            def mock_faction(img: Any) -> Faction | None:
+                faction_call_count[0] += 1
+                return Faction.COLONIAL if faction_call_count[0] == 1 else None
+
+            with patch.object(service, "_detect_faction", side_effect=mock_faction):
                 service.verify(profile_bytes, shard_bytes)
 
                 assert os.path.exists(tmp_path / "debug_image1_regions.png")
@@ -1477,23 +1456,25 @@ class TestVerificationServiceVerify:
         def mock_ocr(*args: Any, **kwargs: Any) -> str:
             call_count[0] += 1
             if call_count[0] == 1:
-                return "TestPlayer"  # img1 username
+                return "TestPlayer"  # username
             if call_count[0] == 2:
-                return "Level: 25"  # img1 level
+                return "Level: 25"  # level
             if call_count[0] == 3:
-                return ""  # img1 regiment
-            if call_count[0] == 4:
-                return ""  # img2 username
-            if call_count[0] == 5:
-                return ""  # img1 shard
-            return "1234, 1530\nABLE"  # img2 shard
+                return ""  # regiment
+            return "1234, 1530\nABLE"  # shard
 
         with patch(
             "verification_ocr.services.verification_service.pytesseract.image_to_string",
             side_effect=mock_ocr,
         ):
             service = VerificationService(mock_settings)
-            with patch.object(service, "_detect_faction", return_value=Faction.COLONIAL):
+            faction_call_count = [0]
+
+            def mock_faction(img: Any) -> Faction | None:
+                faction_call_count[0] += 1
+                return Faction.COLONIAL if faction_call_count[0] == 1 else None
+
+            with patch.object(service, "_detect_faction", side_effect=mock_faction):
                 result = service.verify(profile_bytes, shard_bytes)
 
                 assert result.shard == "ABLE"
@@ -1530,29 +1511,31 @@ class TestVerificationServiceVerify:
         def mock_ocr(*args: Any, **kwargs: Any) -> str:
             call_count[0] += 1
             if call_count[0] == 1:
-                return "TestPlayer"  # img1 username
+                return "TestPlayer"  # username
             if call_count[0] == 2:
-                return "Level: 25"  # img1 level
+                return "Level: 25"  # level
             if call_count[0] == 3:
-                return ""  # img1 regiment
-            if call_count[0] == 4:
-                return ""  # img2 username
-            if call_count[0] == 5:
-                return ""  # img1 shard
-            return "100, 1200\nABLE"  # img2 shard
+                return ""  # regiment
+            return "100, 1200\nABLE"  # shard
 
         with patch(
             "verification_ocr.services.verification_service.pytesseract.image_to_string",
             side_effect=mock_ocr,
         ):
             service = VerificationService(mock_settings)
-            with patch.object(service, "_detect_faction", return_value=Faction.COLONIAL):
+            faction_call_count = [0]
+
+            def mock_faction(img: Any) -> Faction | None:
+                faction_call_count[0] += 1
+                return Faction.COLONIAL if faction_call_count[0] == 1 else None
+
+            with patch.object(service, "_detect_faction", side_effect=mock_faction):
                 result = service.verify(profile_bytes, shard_bytes)
 
                 assert result.war_number == 132
                 assert result.current_ingame_time is not None
 
-    def test_verify_returns_ingame_time_none_when_no_shard_info(
+    def test_verify_raises_error_when_no_shard_info(
         self,
         mock_settings: AppSettings,
     ) -> None:
@@ -1576,14 +1559,12 @@ class TestVerificationServiceVerify:
         def mock_ocr(*args: Any, **kwargs: Any) -> str:
             call_count[0] += 1
             if call_count[0] == 1:
-                return "TestPlayer"  # img1 username
+                return "TestPlayer"  # username
             if call_count[0] == 2:
-                return "Level: 25"  # img1 level
+                return "Level: 25"  # level
             if call_count[0] == 3:
-                return ""  # img1 regiment
-            if call_count[0] == 4:
-                return ""  # img2 username
-            # Return empty for both shard regions
+                return ""  # regiment
+            # Return empty for shard region
             return ""
 
         with patch(
@@ -1591,8 +1572,17 @@ class TestVerificationServiceVerify:
             side_effect=mock_ocr,
         ):
             service = VerificationService(mock_settings)
-            with pytest.raises(ValueError, match="No shard information found in either image"):
-                service.verify(profile_bytes, shard_bytes)
+            faction_call_count = [0]
+
+            def mock_faction(img: Any) -> Faction | None:
+                faction_call_count[0] += 1
+                return Faction.COLONIAL if faction_call_count[0] == 1 else None
+
+            with patch.object(service, "_detect_faction", side_effect=mock_faction):
+                with pytest.raises(
+                    ValueError, match="No shard information found in the map/shard image"
+                ):
+                    service.verify(profile_bytes, shard_bytes)
 
     def test_verify_returns_result_when_war_not_configured(
         self,
@@ -1620,23 +1610,25 @@ class TestVerificationServiceVerify:
         def mock_ocr(*args: Any, **kwargs: Any) -> str:
             call_count[0] += 1
             if call_count[0] == 1:
-                return "TestPlayer"  # img1 username
+                return "TestPlayer"  # username
             if call_count[0] == 2:
-                return "Level: 25"  # img1 level
+                return "Level: 25"  # level
             if call_count[0] == 3:
-                return ""  # img1 regiment
-            if call_count[0] == 4:
-                return ""  # img2 username
-            if call_count[0] == 5:
-                return ""  # img1 shard
-            return "100, 1200\nABLE"  # img2 shard
+                return ""  # regiment
+            return "100, 1200\nABLE"  # shard
 
         with patch(
             "verification_ocr.services.verification_service.pytesseract.image_to_string",
             side_effect=mock_ocr,
         ):
             service = VerificationService(mock_settings)
-            with patch.object(service, "_detect_faction", return_value=Faction.COLONIAL):
+            faction_call_count = [0]
+
+            def mock_faction(img: Any) -> Faction | None:
+                faction_call_count[0] += 1
+                return Faction.COLONIAL if faction_call_count[0] == 1 else None
+
+            with patch.object(service, "_detect_faction", side_effect=mock_faction):
                 result = service.verify(profile_bytes, shard_bytes)
 
                 assert result.ingame_time == "100, 12:00"
@@ -1814,28 +1806,36 @@ class TestVerificationServiceIntegration:
 
     def test_verify_handles_tesseract_error(
         self,
-        mock_settings: AppSettings,
+        integration_settings: AppSettings,
     ) -> None:
         """
         Test that Tesseract errors are handled gracefully.
 
         Args:
-            mock_settings (AppSettings): Mock settings fixture.
+            integration_settings (AppSettings): Integration settings fixture.
 
         """
-        img = np.ones((500, 500, 3), dtype=np.uint8) * 255
+        img = np.ones((2160, 3840, 3), dtype=np.uint8) * 255
         _, buffer = cv2.imencode(".png", img)
         image_bytes = buffer.tobytes()
 
-        service = VerificationService(mock_settings)
+        service = VerificationService(integration_settings)
 
-        with patch.object(
-            service,
-            "_find_user_info",
-            side_effect=pytesseract.TesseractError("Tesseract failed", 1),
-        ):
-            with pytest.raises(RuntimeError, match="OCR processing error"):
-                service.verify(image_bytes, image_bytes)
+        # First mock faction detection to work, then fail on _find_user_info
+        faction_call_count = [0]
+
+        def mock_faction(img: Any) -> Faction | None:
+            faction_call_count[0] += 1
+            return Faction.COLONIAL if faction_call_count[0] == 1 else None
+
+        with patch.object(service, "_detect_faction", side_effect=mock_faction):
+            with patch.object(
+                service,
+                "_find_user_info",
+                side_effect=pytesseract.TesseractError("Tesseract failed", 1),
+            ):
+                with pytest.raises(RuntimeError, match="OCR processing error"):
+                    service.verify(image_bytes, image_bytes)
 
     def test_verify_handles_unexpected_exception(
         self,

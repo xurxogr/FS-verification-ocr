@@ -759,52 +759,59 @@ class VerificationService:
                     filename="debug_image2_regions.png",
                 )
 
-            # Try to extract user info from both images
+            # First, detect faction in both images to identify the profile image
             ocr_start = time.perf_counter()
-            user_info1 = self._find_user_info(image=img1, regions=regions1)
-            user_info2 = self._find_user_info(image=img2, regions=regions2)
 
-            # Try to extract shard info from both images
-            shard1, time1 = self._get_shard_and_time(image=img1, regions=regions1)
-            shard2, time2 = self._get_shard_and_time(image=img2, regions=regions2)
-            ocr_time = time.perf_counter() - ocr_start
+            r1 = regions1.icon
+            icon1 = img1[r1.y1 : r1.y2, r1.x1 : r1.x2]
+            faction1 = self._detect_faction(icon1)
 
-            # Determine which image has user info (name) and which has shard info
-            has_user_info1 = user_info1.name is not None
-            has_user_info2 = user_info2.name is not None
-            has_shard_info1 = shard1 is not None
-            has_shard_info2 = shard2 is not None
+            r2 = regions2.icon
+            icon2 = img2[r2.y1 : r2.y2, r2.x1 : r2.x2]
+            faction2 = self._detect_faction(icon2)
 
-            # Validate we have exactly one image with user info
-            if not has_user_info1 and not has_user_info2:
-                raise ValueError("No player name found in either image")
-            if has_user_info1 and has_user_info2:
+            # Determine which image is the profile (has faction icon)
+            has_faction1 = faction1 is not None
+            has_faction2 = faction2 is not None
+
+            if not has_faction1 and not has_faction2:
                 raise ValueError(
-                    "Both images contain player names - need one profile image "
-                    "and one map/shard image"
+                    "Could not detect faction icon in either image - "
+                    "need one profile image with colonial or wardens icon"
+                )
+            if has_faction1 and has_faction2:
+                raise ValueError(
+                    "Both images contain faction icons - "
+                    "need one profile image and one map/shard image"
                 )
 
-            # Validate we have exactly one image with shard info
-            if not has_shard_info1 and not has_shard_info2:
-                raise ValueError("No shard information found in either image")
-
-            # Select the correct data from each image
-            if has_user_info1:
-                verification = user_info1
-                shard, ingame_time = shard2, time2
+            # Extract data from the correct images
+            if has_faction1:
+                profile_img, profile_regions = img1, regions1
+                shard_img, shard_regions = img2, regions2
+                faction = faction1
             else:
-                verification = user_info2
-                shard, ingame_time = shard1, time1
+                profile_img, profile_regions = img2, regions2
+                shard_img, shard_regions = img1, regions1
+                faction = faction2
+
+            # Extract user info from profile image
+            verification = self._find_user_info(image=profile_img, regions=profile_regions)
+            verification.faction = faction
+
+            # Validate name was found in profile image
+            if verification.name is None:
+                raise ValueError("No player name found in the profile image")
+
+            # Extract shard info from shard image
+            shard, ingame_time = self._get_shard_and_time(image=shard_img, regions=shard_regions)
+            ocr_time = time.perf_counter() - ocr_start
+
+            if shard is None:
+                raise ValueError("No shard information found in the map/shard image")
 
             verification.shard = shard
             verification.ingame_time = ingame_time
-
-            # Validate faction was detected
-            if verification.faction is None:
-                raise ValueError(
-                    "Could not detect faction - no colonial or wardens icon found in "
-                    "the profile image"
-                )
 
             # Add war state info
             war_service = get_war_service()

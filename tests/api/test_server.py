@@ -356,16 +356,18 @@ class TestVerifyEndpoint:
         def mock_ocr(*args: Any, **kwargs: Any) -> str:
             call_count[0] += 1
             if call_count[0] == 1:
-                return "TestUser"  # img1 username
+                return "TestUser"  # username
             if call_count[0] == 2:
-                return "Level: 15"  # img1 level
+                return "Level: 15"  # level
             if call_count[0] == 3:
-                return ""  # img1 regiment
-            if call_count[0] == 4:
-                return ""  # img2 username (no name = shard image)
-            if call_count[0] == 5:
-                return ""  # img1 shard
-            return "100, 1200\nABLE"  # img2 shard
+                return ""  # regiment
+            return "100, 1200\nABLE"  # shard
+
+        faction_call_count = [0]
+
+        def mock_faction(*args: Any, **kwargs: Any) -> Faction | None:
+            faction_call_count[0] += 1
+            return Faction.COLONIAL if faction_call_count[0] == 1 else None
 
         with patch(
             "verification_ocr.services.verification_service.pytesseract.image_to_string",
@@ -373,7 +375,7 @@ class TestVerifyEndpoint:
         ):
             with patch(
                 "verification_ocr.services.verification_service.VerificationService._detect_faction",
-                return_value=Faction.COLONIAL,
+                side_effect=mock_faction,
             ):
                 response = test_client.post(
                     "/foxhole/verify",
@@ -430,7 +432,7 @@ class TestVerifyEndpoint:
 
             assert response.status_code == 422
             data = response.json()
-            assert "No player name found in either image" in data["detail"]
+            assert "Could not detect faction icon in either image" in data["detail"]
 
     def test_verify_returns_500_on_runtime_error(self, test_client: TestClient) -> None:
         """Test that verify returns 500 error on RuntimeError."""
@@ -695,16 +697,18 @@ class TestApiKeyAuthentication:
         def mock_ocr(*args: Any, **kwargs: Any) -> str:
             call_count[0] += 1
             if call_count[0] == 1:
-                return "TestUser"  # img1 username
+                return "TestUser"  # username
             if call_count[0] == 2:
-                return "Level: 15"  # img1 level
+                return "Level: 15"  # level
             if call_count[0] == 3:
-                return ""  # img1 regiment
-            if call_count[0] == 4:
-                return ""  # img2 username
-            if call_count[0] == 5:
-                return ""  # img1 shard
-            return "100, 1200\nABLE"  # img2 shard
+                return ""  # regiment
+            return "100, 1200\nABLE"  # shard
+
+        faction_call_count = [0]
+
+        def mock_faction(*args: Any, **kwargs: Any) -> Faction | None:
+            faction_call_count[0] += 1
+            return Faction.COLONIAL if faction_call_count[0] == 1 else None
 
         # Enable API key requirement
         with patch.object(settings.api_server, "api_key", "test-secret-key"):
@@ -714,7 +718,7 @@ class TestApiKeyAuthentication:
             ):
                 with patch(
                     "verification_ocr.services.verification_service.VerificationService._detect_faction",
-                    return_value=Faction.COLONIAL,
+                    side_effect=mock_faction,
                 ):
                     response = test_client.post(
                         "/foxhole/verify",
