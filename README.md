@@ -1,4 +1,9 @@
-# Verification OCR Service
+# FS-Verification-OCR
+
+[![CI](https://github.com/xurxogr/FS-verification-ocr/workflows/CI/badge.svg)](https://github.com/xurxogr/FS-verification-ocr/actions)
+[![codecov](https://codecov.io/gh/xurxogr/FS-verification-ocr/branch/main/graph/badge.svg)](https://codecov.io/gh/xurxogr/FS-verification-ocr)
+[![Python 3.12+](https://img.shields.io/badge/python-3.12%20%7C%203.13-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 A FastAPI service for extracting and comparing information from Foxhole game screenshots using OpenCV and Tesseract OCR.
 
