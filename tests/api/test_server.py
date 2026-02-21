@@ -586,7 +586,7 @@ class TestIndexEndpoint:
 class TestVerifyEndpoint:
     """Tests for /verify endpoint."""
 
-    def _create_test_image(self, width: int = 500, height: int = 500) -> bytes:
+    def _create_test_image(self, width: int = 3840, height: int = 2160) -> bytes:
         """
         Create a test image of specified size.
 
@@ -616,9 +616,21 @@ class TestVerifyEndpoint:
         """
         image_bytes = self._create_test_image()
 
+        call_count = [0]
+
+        def mock_ocr(*args, **kwargs) -> str:
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return "TestUser"  # username
+            if call_count[0] == 2:
+                return "Level: 15"  # level
+            if call_count[0] == 3:
+                return ""  # regiment
+            return "100, 1200\nABLE"  # shard
+
         with patch(
             "verification_ocr.services.verification_service.pytesseract.image_to_string",
-            return_value="TestUser Icon Level: 15\n",
+            side_effect=mock_ocr,
         ):
             response = test_client.post(
                 "/verify",

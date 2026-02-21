@@ -641,6 +641,8 @@ class TestVerificationServiceCalculateRegions:
         regions = service._calculate_regions(img)
 
         assert "username" in regions
+        assert "icon" in regions
+        assert "level" in regions
         assert "regiment" in regions
         assert "shard" in regions
         assert "scale_factor" in regions
@@ -1032,13 +1034,25 @@ class TestVerificationServiceVerify:
             None
         """
         # Create a larger test image
-        img = np.ones((500, 500, 3), dtype=np.uint8) * 255
+        img = np.ones((2160, 3840, 3), dtype=np.uint8) * 255
         _, buffer = cv2.imencode(".png", img)
         image_bytes = buffer.tobytes()
 
+        call_count = [0]
+
+        def mock_ocr(*args, **kwargs) -> str:
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return "TestPlayer"  # username region
+            if call_count[0] == 2:
+                return "Level: 25"  # level region
+            if call_count[0] == 3:
+                return ""  # regiment region
+            return "100, 1200\nABLE"  # shard region
+
         with patch(
             "verification_ocr.services.verification_service.pytesseract.image_to_string",
-            return_value="TestPlayer Icon Level: 25\n",
+            side_effect=mock_ocr,
         ):
             service = VerificationService(mock_settings)
             result = service.verify(image_bytes, image_bytes)
@@ -1054,7 +1068,7 @@ class TestVerificationServiceVerify:
         """
         Test that verify handles malformed OCR text gracefully.
 
-        Tests the except (IndexError, ValueError) branch in _find_user_info.
+        Tests when level region has no colon - level stays None.
 
         Args:
             mock_settings (AppSettings): Mock settings fixture.
@@ -1062,20 +1076,72 @@ class TestVerificationServiceVerify:
         Returns:
             None
         """
-        img = np.ones((500, 500, 3), dtype=np.uint8) * 255
+        img = np.ones((2160, 3840, 3), dtype=np.uint8) * 255
         _, buffer = cv2.imencode(".png", img)
         image_bytes = buffer.tobytes()
 
-        # "Level: abc" will cause ValueError when trying int(parts[1])
-        # Name is still extracted, but level will be None
+        call_count = [0]
+
+        def mock_ocr(*args, **kwargs) -> str:
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return "TestPlayer"  # username region
+            if call_count[0] == 2:
+                return "Level abc"  # level region - no colon
+            if call_count[0] == 3:
+                return ""  # regiment region
+            return "100, 1200\nABLE"  # shard region
+
         with patch(
             "verification_ocr.services.verification_service.pytesseract.image_to_string",
-            return_value="TestPlayer Icon Level: abc\n",
+            side_effect=mock_ocr,
         ):
             service = VerificationService(mock_settings)
             result = service.verify(image_bytes, image_bytes)
 
             # Should not crash - name extracted but level parsing failed gracefully
+            assert result["success"] is True
+            assert result["verification"]["name"] == "TestPlayer"
+            assert result["verification"]["level"] is None
+
+    def test_verify_handles_level_with_colon_but_no_digits(
+        self,
+        mock_settings: AppSettings,
+    ) -> None:
+        """
+        Test that level is None when colon exists but no digits after it.
+
+        Covers branch 603->609 where digits is empty string.
+
+        Args:
+            mock_settings (AppSettings): Mock settings fixture.
+
+        Returns:
+            None
+        """
+        img = np.ones((2160, 3840, 3), dtype=np.uint8) * 255
+        _, buffer = cv2.imencode(".png", img)
+        image_bytes = buffer.tobytes()
+
+        call_count = [0]
+
+        def mock_ocr(*args, **kwargs) -> str:
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return "TestPlayer"  # username region
+            if call_count[0] == 2:
+                return "Level: abc"  # level region - has colon but no digits
+            if call_count[0] == 3:
+                return ""  # regiment region
+            return "100, 1200\nABLE"  # shard region
+
+        with patch(
+            "verification_ocr.services.verification_service.pytesseract.image_to_string",
+            side_effect=mock_ocr,
+        ):
+            service = VerificationService(mock_settings)
+            result = service.verify(image_bytes, image_bytes)
+
             assert result["success"] is True
             assert result["verification"]["name"] == "TestPlayer"
             assert result["verification"]["level"] is None
@@ -1123,7 +1189,7 @@ class TestVerificationServiceVerify:
         Returns:
             None
         """
-        img = np.ones((500, 500, 3), dtype=np.uint8) * 255
+        img = np.ones((2160, 3840, 3), dtype=np.uint8) * 255
         _, buffer = cv2.imencode(".png", img)
         image_bytes = buffer.tobytes()
 
@@ -1133,13 +1199,18 @@ class TestVerificationServiceVerify:
             call_count[0] += 1
             # Call 1: first image username -> empty (no name found, returns early)
             # Call 2: second image username -> return name
-            # Call 3: second image regiment -> doesn't matter
-            # Call 4: first image shard -> doesn't matter
+            # Call 3: second image level -> return level
+            # Call 4: second image regiment -> doesn't matter
+            # Call 5: first image shard -> doesn't matter
             if call_count[0] == 1:
-                return ""
+                return ""  # first image has no name
             if call_count[0] == 2:
-                return "SecondPlayer Icon Level: 30\n"
-            return "ABLE\n"
+                return "SecondPlayer"  # second image username
+            if call_count[0] == 3:
+                return "Level: 30"  # second image level
+            if call_count[0] == 4:
+                return ""  # regiment
+            return "100, 1200\nABLE"  # shard
 
         with patch(
             "verification_ocr.services.verification_service.pytesseract.image_to_string",

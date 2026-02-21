@@ -404,17 +404,33 @@ class VerificationService:
         shard_width = int(box_width * 3.5)
         shard_height = box_height
 
+        # Common y coordinates for username/icon/level row
+        row_y1 = int(0.62 * py)
+        row_y2 = int(0.775 * py)
+
         return {
             "username": {
-                "y1": int(0.63 * py),
-                "y2": int(0.77 * py),
-                "x1": int(1.8 * px),
-                "x2": int(3.2 * px),
+                "y1": row_y1,
+                "y2": row_y2,
+                "x1": int(1.81 * px),
+                "x2": int(2.25 * px),
+            },
+            "icon": {
+                "y1": row_y1,
+                "y2": row_y2,
+                "x1": int(2.34 * px),
+                "x2": int(2.49 * px),
+            },
+            "level": {
+                "y1": row_y1,
+                "y2": row_y2,
+                "x1": int(2.51 * px),
+                "x2": int(2.83 * px),
             },
             "regiment": {
                 "y1": int(1.22 * py),
                 "y2": int(1.34 * py),
-                "x1": int(2.4 * px),
+                "x1": int(2.42 * px),
                 "x2": int(3.5 * px),
             },
             "shard": {
@@ -463,6 +479,44 @@ class VerificationService:
             fontFace=cv2.FONT_HERSHEY_SIMPLEX,
             fontScale=scale * 0.5,
             color=(0, 255, 0),
+            thickness=thickness,
+        )
+
+        # Draw icon region (yellow)
+        r = regions["icon"]
+        cv2.rectangle(
+            img=debug_img,
+            pt1=(r["x1"], r["y1"]),
+            pt2=(r["x2"], r["y2"]),
+            color=(0, 255, 255),
+            thickness=thickness,
+        )
+        cv2.putText(
+            img=debug_img,
+            text="ICON",
+            org=(r["x1"], r["y1"] - 5),
+            fontFace=cv2.FONT_HERSHEY_SIMPLEX,
+            fontScale=scale * 0.5,
+            color=(0, 255, 255),
+            thickness=thickness,
+        )
+
+        # Draw level region (orange)
+        r = regions["level"]
+        cv2.rectangle(
+            img=debug_img,
+            pt1=(r["x1"], r["y1"]),
+            pt2=(r["x2"], r["y2"]),
+            color=(0, 165, 255),
+            thickness=thickness,
+        )
+        cv2.putText(
+            img=debug_img,
+            text="LEVEL",
+            org=(r["x1"], r["y1"] - 5),
+            fontFace=cv2.FONT_HERSHEY_SIMPLEX,
+            fontScale=scale * 0.5,
+            color=(0, 165, 255),
             thickness=thickness,
         )
 
@@ -527,27 +581,31 @@ class VerificationService:
         """
         data = Verification()
 
-        # Extract username and level region
+        # Extract username from dedicated region
         r = regions["username"]
         username_image = image[r["y1"] : r["y2"], r["x1"] : r["x2"]]
-        ocr_text = self._extract_text_from_image(username_image)
-
-        # Parse: [name] [icon text as random word] Level: [level]
-        try:
-            parts = ocr_text.split(" Level: ")
-            if len(parts) >= 2:
-                words = parts[0].split(" ")[:-1]  # Remove icon text
-                data.name = " ".join(words) if words else None
-                data.level = int(parts[1].split()[0])
-        except (IndexError, ValueError):
-            pass
+        username_text = self._extract_text_from_image(username_image)
+        data.name = username_text.strip() if username_text.strip() else None
 
         # No name found - either image is too small or this is a map image
         if data.name is None:
             return data
 
-        # Check for colonial faction icon
-        data.colonial = self._find_colonial_icon(username_image)
+        # Extract level from dedicated region (language-agnostic: look for : and digits)
+        r = regions["level"]
+        level_image = image[r["y1"] : r["y2"], r["x1"] : r["x2"]]
+        level_text = self._extract_text_from_image(level_image)
+        # Look for colon and extract digits after it
+        if ":" in level_text:
+            level_part = level_text.split(":")[-1]
+            digits = "".join(c for c in level_part if c.isdigit())
+            if digits:
+                data.level = int(digits)
+
+        # Check for colonial faction icon in icon region
+        r = regions["icon"]
+        icon_image = image[r["y1"] : r["y2"], r["x1"] : r["x2"]]
+        data.colonial = self._find_colonial_icon(icon_image)
 
         # Extract Regiment name from grey bar region
         r = regions["regiment"]
