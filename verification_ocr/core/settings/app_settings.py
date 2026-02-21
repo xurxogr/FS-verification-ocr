@@ -19,6 +19,9 @@ class APIServerSettings(BaseModel):
         default=50 * 1024 * 1024, description="Max upload size in bytes (default 50MB)"
     )
     rate_limit: str = Field(default="10/minute", description="Rate limit for verification endpoint")
+    api_key: str | None = Field(
+        default=None, description="API key for authentication (None = auth disabled)"
+    )
 
 
 class VerificationSettings(BaseModel):

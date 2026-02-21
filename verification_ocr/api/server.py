@@ -15,7 +15,7 @@ from slowapi.util import get_remote_address
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from verification_ocr import __version__
-from verification_ocr.api.dependencies import get_verification_service
+from verification_ocr.api.dependencies import get_verification_service, verify_api_key
 from verification_ocr.core.settings import get_settings
 from verification_ocr.core.utils import calculate_war_time, get_tesseract_version, setup_logging
 from verification_ocr.models import HealthResponse, VerificationResponse, WarResponse
@@ -211,9 +211,13 @@ async def get_war_info() -> WarResponse:
 
 
 @app.post("/sync")
-async def sync_war() -> dict[str, Any]:
+async def sync_war(
+    _api_key: Annotated[str | None, Depends(verify_api_key)],
+) -> dict[str, Any]:
     """
     Sync war data from Foxhole API and return updated war info.
+
+    Requires API key authentication if configured.
 
     Returns:
         dict[str, Any]: Sync result with success status and current war state including time.
@@ -246,12 +250,15 @@ async def verify_images(
     image1: Annotated[UploadFile, File(description="First image")],
     image2: Annotated[UploadFile, File(description="Second image")],
     service: Annotated[VerificationService, Depends(get_verification_service)],
+    _api_key: Annotated[str | None, Depends(verify_api_key)],
 ) -> VerificationResponse:
     """
     Verify user from two game screenshots.
 
     Upload two images to extract user information (name, level, regiment,
     faction, shard) using OCR and template matching.
+
+    Requires API key authentication if configured.
 
     Args:
         request (Request): The request object (required for rate limiting).

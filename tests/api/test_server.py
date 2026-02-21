@@ -591,6 +591,112 @@ class TestCORSConfiguration:
             assert response.status_code in [200, 405]
 
 
+class TestApiKeyAuthentication:
+    """Tests for API key authentication."""
+
+    def _create_test_image(self) -> bytes:
+        """Create a test image."""
+        img = np.ones((2160, 3840, 3), dtype=np.uint8) * 255
+        _, buffer = cv2.imencode(".png", img)
+        return buffer.tobytes()
+
+    def test_verify_api_key_disabled(self, test_client: TestClient) -> None:
+        """Test that API key is not required when disabled."""
+        from verification_ocr.core.settings import get_settings
+
+        settings = get_settings()
+        # Ensure API key is disabled (None)
+        with patch.object(settings.api_server, "api_key", None):
+            war_service = get_war_service()
+            with patch.object(war_service, "sync_from_api", new_callable=AsyncMock) as mock_sync:
+                mock_sync.return_value = True
+                response = test_client.post("/sync")
+                assert response.status_code == 200
+
+    def test_verify_api_key_required_but_missing(self, test_client: TestClient) -> None:
+        """Test that 401 is returned when API key required but not provided."""
+        from verification_ocr.core.settings import get_settings
+
+        settings = get_settings()
+        # Enable API key requirement
+        with patch.object(settings.api_server, "api_key", "test-secret-key"):
+            response = test_client.post("/sync")
+            assert response.status_code == 401
+            assert response.json()["detail"] == "API key required"
+
+    def test_verify_api_key_invalid(self, test_client: TestClient) -> None:
+        """Test that 401 is returned when API key is invalid."""
+        from verification_ocr.core.settings import get_settings
+
+        settings = get_settings()
+        # Enable API key requirement
+        with patch.object(settings.api_server, "api_key", "test-secret-key"):
+            response = test_client.post(
+                "/sync",
+                headers={"X-API-Key": "wrong-key"},
+            )
+            assert response.status_code == 401
+            assert response.json()["detail"] == "Invalid API key"
+
+    def test_verify_api_key_valid(self, test_client: TestClient) -> None:
+        """Test that request succeeds with valid API key."""
+        from verification_ocr.core.settings import get_settings
+
+        settings = get_settings()
+        # Enable API key requirement
+        with patch.object(settings.api_server, "api_key", "test-secret-key"):
+            war_service = get_war_service()
+            with patch.object(war_service, "sync_from_api", new_callable=AsyncMock) as mock_sync:
+                mock_sync.return_value = True
+                response = test_client.post(
+                    "/sync",
+                    headers={"X-API-Key": "test-secret-key"},
+                )
+                assert response.status_code == 200
+
+    def test_verify_endpoint_requires_api_key(self, test_client: TestClient) -> None:
+        """Test that /verify endpoint requires API key when enabled."""
+        from verification_ocr.core.settings import get_settings
+
+        settings = get_settings()
+        image_bytes = self._create_test_image()
+
+        # Enable API key requirement
+        with patch.object(settings.api_server, "api_key", "test-secret-key"):
+            response = test_client.post(
+                "/verify",
+                files={
+                    "image1": ("test1.png", io.BytesIO(image_bytes), "image/png"),
+                    "image2": ("test2.png", io.BytesIO(image_bytes), "image/png"),
+                },
+            )
+            assert response.status_code == 401
+            assert response.json()["detail"] == "API key required"
+
+    def test_verify_endpoint_with_valid_api_key(self, test_client: TestClient) -> None:
+        """Test that /verify endpoint works with valid API key."""
+        from verification_ocr.core.settings import get_settings
+
+        settings = get_settings()
+        image_bytes = self._create_test_image()
+
+        # Enable API key requirement
+        with patch.object(settings.api_server, "api_key", "test-secret-key"):
+            with patch(
+                "verification_ocr.services.verification_service.pytesseract.image_to_string",
+                return_value="TestUser",
+            ):
+                response = test_client.post(
+                    "/verify",
+                    files={
+                        "image1": ("test1.png", io.BytesIO(image_bytes), "image/png"),
+                        "image2": ("test2.png", io.BytesIO(image_bytes), "image/png"),
+                    },
+                    headers={"X-API-Key": "test-secret-key"},
+                )
+                assert response.status_code == 200
+
+
 class TestIndexEndpointSecurity:
     """Tests for index endpoint security features."""
 
