@@ -12,7 +12,6 @@ def main() -> int:
     """
     Main CLI entry point.
 
-    Returns:
         int: Exit code (0 for success).
     """
     parser = argparse.ArgumentParser(
@@ -44,7 +43,6 @@ def run_server(args: argparse.Namespace) -> int:
     Args:
         args (argparse.Namespace): Parsed command line arguments.
 
-    Returns:
         int: Exit code (0 for success).
     """
     settings = get_settings()

@@ -14,8 +14,6 @@ class TestMain:
         """
         Test that main with no args shows help and returns 0.
 
-        Returns:
-            None
         """
         with patch.object(sys, "argv", ["vocr"]):
             with patch("argparse.ArgumentParser.print_help") as mock_help:
@@ -27,8 +25,6 @@ class TestMain:
         """
         Test that main with server command calls run_server.
 
-        Returns:
-            None
         """
         with patch.object(sys, "argv", ["vocr", "server"]):
             with patch("verification_ocr.cli.run_server", return_value=0) as mock_run:
@@ -40,8 +36,6 @@ class TestMain:
         """
         Test that main passes host argument to run_server.
 
-        Returns:
-            None
         """
         with patch.object(sys, "argv", ["vocr", "server", "--host", "127.0.0.1"]):
             with patch("verification_ocr.cli.run_server", return_value=0) as mock_run:
@@ -53,8 +47,6 @@ class TestMain:
         """
         Test that main passes port argument to run_server.
 
-        Returns:
-            None
         """
         with patch.object(sys, "argv", ["vocr", "server", "--port", "9000"]):
             with patch("verification_ocr.cli.run_server", return_value=0) as mock_run:
@@ -66,8 +58,6 @@ class TestMain:
         """
         Test that main passes reload argument to run_server.
 
-        Returns:
-            None
         """
         with patch.object(sys, "argv", ["vocr", "server", "--reload"]):
             with patch("verification_ocr.cli.run_server", return_value=0) as mock_run:
@@ -79,8 +69,6 @@ class TestMain:
         """
         Test that unknown command shows help.
 
-        Returns:
-            None
         """
         with patch.object(sys, "argv", ["vocr"]):
             with patch("argparse.ArgumentParser.print_help") as mock_help:
@@ -96,8 +84,6 @@ class TestRunServer:
         """
         Test that run_server calls uvicorn.run.
 
-        Returns:
-            None
         """
         args = argparse.Namespace(host=None, port=None, reload=False)
 
@@ -111,8 +97,6 @@ class TestRunServer:
         """
         Test that run_server uses custom host.
 
-        Returns:
-            None
         """
         args = argparse.Namespace(host="127.0.0.1", port=None, reload=False)
 
@@ -126,8 +110,6 @@ class TestRunServer:
         """
         Test that run_server uses custom port.
 
-        Returns:
-            None
         """
         args = argparse.Namespace(host=None, port=9000, reload=False)
 
@@ -141,8 +123,6 @@ class TestRunServer:
         """
         Test that run_server uses reload setting.
 
-        Returns:
-            None
         """
         args = argparse.Namespace(host=None, port=None, reload=True)
 
@@ -156,8 +136,6 @@ class TestRunServer:
         """
         Test that run_server uses default host from settings when not provided.
 
-        Returns:
-            None
         """
         args = argparse.Namespace(host=None, port=None, reload=False)
 
@@ -172,8 +150,6 @@ class TestRunServer:
         """
         Test that run_server uses default port from settings when not provided.
 
-        Returns:
-            None
         """
         args = argparse.Namespace(host=None, port=None, reload=False)
 
@@ -188,8 +164,6 @@ class TestRunServer:
         """
         Test that run_server passes correct app string to uvicorn.
 
-        Returns:
-            None
         """
         args = argparse.Namespace(host=None, port=None, reload=False)
 

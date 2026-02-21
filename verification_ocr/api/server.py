@@ -4,7 +4,7 @@ import logging
 import os
 import time
 from contextlib import asynccontextmanager
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import Depends, FastAPI, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -16,12 +16,7 @@ from verification_ocr.api.dependencies import get_verification_service
 from verification_ocr.core.settings import get_settings
 from verification_ocr.core.utils import get_tesseract_version, setup_logging
 from verification_ocr.models import HealthResponse, VerificationResponse, WarResponse
-from verification_ocr.services import (
-    VerificationService,
-    get_war_state,
-    initialize_war_state_from_settings,
-    sync_war_from_api,
-)
+from verification_ocr.services import VerificationService, get_war_service
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +30,6 @@ def calculate_war_time(start_time: int) -> tuple[int, int, int]:
     Args:
         start_time (int): War start time in milliseconds.
 
-    Returns:
         tuple[int, int, int]: (war_day, war_hour, war_minute)
     """
     current_time_ms = int(time.time() * 1000)
@@ -62,7 +56,6 @@ async def lifespan(app: FastAPI):
         app (FastAPI): The FastAPI application instance.
 
     Yields:
-        None
     """
     settings = get_settings()
 
@@ -85,20 +78,22 @@ async def lifespan(app: FastAPI):
     logger.info(f"Tesseract available: {tesseract_version}")
 
     # Initialize war state from settings
-    initialize_war_state_from_settings(
+    war_service = get_war_service()
+    war_service.initialize(
         war_number=settings.war.number,
         start_time=settings.war.start_time,
     )
 
     # If not configured, fetch from Foxhole API
-    war_state = get_war_state()
-    if not war_state.is_configured():
+    if not war_service.state.is_configured():
         logger.info("War settings not configured, fetching from Foxhole API...")
-        await sync_war_from_api()
+        await war_service.sync_from_api()
 
-    if war_state.is_configured():
-        war_day, war_hour, war_minute = calculate_war_time(start_time=war_state.start_time)
-        logger.info(f"War {war_state.war_number} - Day {war_day}, {war_hour:02d}:{war_minute:02d}")
+    if war_service.state.is_configured():
+        war_day, war_hour, war_minute = calculate_war_time(start_time=war_service.state.start_time)
+        logger.info(
+            f"War {war_service.state.war_number} - Day {war_day}, {war_hour:02d}:{war_minute:02d}"
+        )
     else:
         logger.warning("War state not configured and could not be fetched from API")
 
@@ -111,7 +106,6 @@ def create_app() -> FastAPI:
     """
     Create and configure the FastAPI application.
 
-    Returns:
         FastAPI: The configured FastAPI application instance.
     """
     settings = get_settings()
@@ -143,12 +137,11 @@ app = create_app()
 
 
 @app.get("/", include_in_schema=False, response_model=None)
-async def index() -> FileResponse | dict:
+async def index() -> FileResponse | dict[str, str]:
     """
     Serve the frontend.
 
-    Returns:
-        FileResponse | dict: The index.html file or a JSON message with docs link.
+        FileResponse | dict[str, str]: The index.html file or a JSON message with docs link.
     """
     index_path = os.path.join(STATIC_DIR, "index.html")
     if os.path.exists(index_path):
@@ -161,7 +154,6 @@ async def health_check() -> HealthResponse:
     """
     Health check endpoint (no auth required).
 
-    Returns:
         HealthResponse: Health status including version and tesseract availability.
     """
     return HealthResponse(
@@ -179,49 +171,51 @@ async def get_war_info() -> WarResponse:
     Returns:
         WarResponse: War number and calculated war day/time based on start time.
     """
-    war_state = get_war_state()
+    war_service = get_war_service()
+    state = war_service.state
 
     war_day = None
     war_hour = None
     war_minute = None
 
-    if war_state.start_time is not None:
-        war_day, war_hour, war_minute = calculate_war_time(start_time=war_state.start_time)
+    if state.start_time is not None:
+        war_day, war_hour, war_minute = calculate_war_time(start_time=state.start_time)
 
     return WarResponse(
-        war_number=war_state.war_number,
+        war_number=state.war_number,
         war_day=war_day,
         war_hour=war_hour,
         war_minute=war_minute,
-        start_time=war_state.start_time,
+        start_time=state.start_time,
     )
 
 
 @app.post("/sync")
-async def sync_war() -> dict:
+async def sync_war() -> dict[str, Any]:
     """
     Sync war data from Foxhole API and return updated war info.
 
     Returns:
-        dict: Sync result with success status and current war state including time.
+        dict[str, Any]: Sync result with success status and current war state including time.
     """
-    success = await sync_war_from_api()
-    war_state = get_war_state()
+    war_service = get_war_service()
+    success = await war_service.sync_from_api()
+    state = war_service.state
 
     war_day = None
     war_hour = None
     war_minute = None
 
-    if war_state.start_time is not None:
-        war_day, war_hour, war_minute = calculate_war_time(start_time=war_state.start_time)
+    if state.start_time is not None:
+        war_day, war_hour, war_minute = calculate_war_time(start_time=state.start_time)
 
     return {
         "success": success,
-        "war_number": war_state.war_number,
+        "war_number": state.war_number,
         "war_day": war_day,
         "war_hour": war_hour,
         "war_minute": war_minute,
-        "start_time": war_state.start_time,
+        "start_time": state.start_time,
     }
 
 
@@ -242,7 +236,6 @@ async def verify_images(
         image2 (UploadFile): Second screenshot (profile or map).
         service (VerificationService): Injected verification service.
 
-    Returns:
         VerificationResponse: Verification result with user info or error.
     """
     # Read image bytes
@@ -250,9 +243,7 @@ async def verify_images(
     image2_bytes = await image2.read()
 
     # Process and compare
-    result = service.verify(
+    return service.verify(
         image1_bytes=image1_bytes,
         image2_bytes=image2_bytes,
     )
-
-    return VerificationResponse(**result)

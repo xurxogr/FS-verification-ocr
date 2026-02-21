@@ -11,7 +11,6 @@ def get_verification_service() -> VerificationService:
     """
     Get cached verification service singleton.
 
-    Returns:
         VerificationService: The verification service instance.
     """
     settings = get_settings()
@@ -22,7 +21,5 @@ def clear_dependency_caches() -> None:
     """
     Clear all dependency caches.
 
-    Returns:
-        None
     """
     get_verification_service.cache_clear()

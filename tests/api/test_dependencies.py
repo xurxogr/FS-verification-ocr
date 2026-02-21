@@ -14,8 +14,6 @@ class TestGetVerificationService:
         """
         Test that get_verification_service returns VerificationService.
 
-        Returns:
-            None
         """
         clear_dependency_caches()
         service = get_verification_service()
@@ -25,8 +23,6 @@ class TestGetVerificationService:
         """
         Test that get_verification_service returns cached instance.
 
-        Returns:
-            None
         """
         clear_dependency_caches()
         service1 = get_verification_service()
@@ -37,8 +33,6 @@ class TestGetVerificationService:
         """
         Test that service uses settings from get_settings.
 
-        Returns:
-            None
         """
         clear_dependency_caches()
         service = get_verification_service()
@@ -53,8 +47,6 @@ class TestClearDependencyCaches:
         """
         Test that clear_dependency_caches clears the service cache.
 
-        Returns:
-            None
         """
         clear_dependency_caches()
         service1 = get_verification_service()
@@ -67,8 +59,6 @@ class TestClearDependencyCaches:
         """
         Test that clear_dependency_caches doesn't error on empty cache.
 
-        Returns:
-            None
         """
         clear_dependency_caches()
         clear_dependency_caches()  # Should not raise

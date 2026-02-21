@@ -20,8 +20,6 @@ class TestAPIServerSettings:
         """
         Test default host value.
 
-        Returns:
-            None
         """
         settings = APIServerSettings()
         assert settings.host == "0.0.0.0"
@@ -30,8 +28,6 @@ class TestAPIServerSettings:
         """
         Test default port value.
 
-        Returns:
-            None
         """
         settings = APIServerSettings()
         assert settings.port == 8000
@@ -40,8 +36,6 @@ class TestAPIServerSettings:
         """
         Test default workers value.
 
-        Returns:
-            None
         """
         settings = APIServerSettings()
         assert settings.workers == 1
@@ -50,8 +44,6 @@ class TestAPIServerSettings:
         """
         Test default CORS allow origins.
 
-        Returns:
-            None
         """
         settings = APIServerSettings()
         assert settings.cors_allow_origins == ["*"]
@@ -60,8 +52,6 @@ class TestAPIServerSettings:
         """
         Test custom values.
 
-        Returns:
-            None
         """
         settings = APIServerSettings(
             host="127.0.0.1",
@@ -82,8 +72,6 @@ class TestVerificationSettings:
         """
         Test default max_ingame_time_diff.
 
-        Returns:
-            None
         """
         settings = VerificationSettings()
         assert settings.max_ingame_time_diff == 25
@@ -92,8 +80,6 @@ class TestVerificationSettings:
         """
         Test custom max_ingame_time_diff.
 
-        Returns:
-            None
         """
         settings = VerificationSettings(max_ingame_time_diff=60)
         assert settings.max_ingame_time_diff == 60
@@ -106,8 +92,6 @@ class TestOCRSettings:
         """
         Test default tesseract_cmd is None.
 
-        Returns:
-            None
         """
         settings = OCRSettings()
         assert settings.tesseract_cmd is None
@@ -116,8 +100,6 @@ class TestOCRSettings:
         """
         Test default language includes multiple languages.
 
-        Returns:
-            None
         """
         settings = OCRSettings()
         assert "eng" in settings.language
@@ -127,8 +109,6 @@ class TestOCRSettings:
         """
         Test default colonial_icon_path.
 
-        Returns:
-            None
         """
         settings = OCRSettings()
         assert settings.colonial_icon_path == "data/colonial_icon.png"
@@ -137,8 +117,6 @@ class TestOCRSettings:
         """
         Test default scale_factor.
 
-        Returns:
-            None
         """
         settings = OCRSettings()
         assert settings.scale_factor == 4
@@ -147,8 +125,6 @@ class TestOCRSettings:
         """
         Test default CLAHE settings.
 
-        Returns:
-            None
         """
         settings = OCRSettings()
         assert settings.clahe_clip_limit == 2.0
@@ -158,8 +134,6 @@ class TestOCRSettings:
         """
         Test default base dimensions for scaling.
 
-        Returns:
-            None
         """
         settings = OCRSettings()
         assert settings.base_height == 2160
@@ -170,8 +144,6 @@ class TestOCRSettings:
         """
         Test default debug settings.
 
-        Returns:
-            None
         """
         settings = OCRSettings()
         assert settings.debug_mode is False
@@ -181,8 +153,6 @@ class TestOCRSettings:
         """
         Test custom tesseract_cmd.
 
-        Returns:
-            None
         """
         settings = OCRSettings(tesseract_cmd="/custom/tesseract")
         assert settings.tesseract_cmd == "/custom/tesseract"
@@ -191,8 +161,6 @@ class TestOCRSettings:
         """
         Test custom language.
 
-        Returns:
-            None
         """
         settings = OCRSettings(language="spa")
         assert settings.language == "spa"
@@ -201,8 +169,6 @@ class TestOCRSettings:
         """
         Test custom colonial_icon_path.
 
-        Returns:
-            None
         """
         settings = OCRSettings(colonial_icon_path="/path/to/icon.png")
         assert settings.colonial_icon_path == "/path/to/icon.png"
@@ -215,8 +181,6 @@ class TestWarSettings:
         """
         Test default war number is None.
 
-        Returns:
-            None
         """
         settings = WarSettings()
         assert settings.number is None
@@ -225,8 +189,6 @@ class TestWarSettings:
         """
         Test default start_time is None.
 
-        Returns:
-            None
         """
         settings = WarSettings()
         assert settings.start_time is None
@@ -235,8 +197,6 @@ class TestWarSettings:
         """
         Test custom war number.
 
-        Returns:
-            None
         """
         settings = WarSettings(number=132)
         assert settings.number == 132
@@ -245,8 +205,6 @@ class TestWarSettings:
         """
         Test custom start_time.
 
-        Returns:
-            None
         """
         settings = WarSettings(start_time=1770663602746)
         assert settings.start_time == 1770663602746
@@ -259,8 +217,6 @@ class TestLoggingSettings:
         """
         Test default log level.
 
-        Returns:
-            None
         """
         settings = LoggingSettings()
         assert settings.log_level == "INFO"
@@ -269,8 +225,6 @@ class TestLoggingSettings:
         """
         Test default log format.
 
-        Returns:
-            None
         """
         settings = LoggingSettings()
         assert "%(asctime)s" in settings.log_format
@@ -280,8 +234,6 @@ class TestLoggingSettings:
         """
         Test default date format.
 
-        Returns:
-            None
         """
         settings = LoggingSettings()
         assert settings.date_format == "%Y-%m-%d %H:%M:%S"
@@ -290,8 +242,6 @@ class TestLoggingSettings:
         """
         Test default loggers dict.
 
-        Returns:
-            None
         """
         settings = LoggingSettings()
         assert settings.loggers == {}
@@ -300,8 +250,6 @@ class TestLoggingSettings:
         """
         Test default rotate_logs.
 
-        Returns:
-            None
         """
         settings = LoggingSettings()
         assert settings.rotate_logs is False
@@ -310,8 +258,6 @@ class TestLoggingSettings:
         """
         Test default log_file.
 
-        Returns:
-            None
         """
         settings = LoggingSettings()
         assert settings.log_file is None
@@ -320,8 +266,6 @@ class TestLoggingSettings:
         """
         Test custom log level.
 
-        Returns:
-            None
         """
         settings = LoggingSettings(log_level="DEBUG")
         assert settings.log_level == "DEBUG"
@@ -330,8 +274,6 @@ class TestLoggingSettings:
         """
         Test custom loggers.
 
-        Returns:
-            None
         """
         settings = LoggingSettings(loggers={"uvicorn": "WARNING"})
         assert settings.loggers == {"uvicorn": "WARNING"}
@@ -344,8 +286,6 @@ class TestAppSettings:
         """
         Test default api_server settings.
 
-        Returns:
-            None
         """
         settings = AppSettings()
         assert isinstance(settings.api_server, APIServerSettings)
@@ -354,8 +294,6 @@ class TestAppSettings:
         """
         Test default ocr settings.
 
-        Returns:
-            None
         """
         settings = AppSettings()
         assert isinstance(settings.ocr, OCRSettings)
@@ -364,8 +302,6 @@ class TestAppSettings:
         """
         Test default logging settings.
 
-        Returns:
-            None
         """
         settings = AppSettings()
         assert isinstance(settings.logging, LoggingSettings)
@@ -374,8 +310,6 @@ class TestAppSettings:
         """
         Test default war settings.
 
-        Returns:
-            None
         """
         settings = AppSettings()
         assert isinstance(settings.war, WarSettings)
@@ -384,8 +318,6 @@ class TestAppSettings:
         """
         Test default verification settings.
 
-        Returns:
-            None
         """
         settings = AppSettings()
         assert isinstance(settings.verification, VerificationSettings)
@@ -394,8 +326,6 @@ class TestAppSettings:
         """
         Test that environment variables with VOCR_ prefix are loaded.
 
-        Returns:
-            None
         """
         with patch.dict(
             os.environ,
@@ -409,8 +339,6 @@ class TestAppSettings:
         """
         Test that nested settings use __ delimiter.
 
-        Returns:
-            None
         """
         with patch.dict(
             os.environ,
@@ -424,8 +352,6 @@ class TestAppSettings:
         """
         Test creating settings with custom nested values.
 
-        Returns:
-            None
         """
         settings = AppSettings(
             api_server=APIServerSettings(port=5000),

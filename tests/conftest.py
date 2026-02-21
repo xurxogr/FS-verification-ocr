@@ -20,7 +20,6 @@ def mock_settings() -> AppSettings:
     """
     Create mock application settings for testing.
 
-    Returns:
         AppSettings: Mock settings instance.
     """
     return AppSettings(
@@ -51,7 +50,6 @@ def sample_image_bytes() -> bytes:
     """
     Create sample image bytes for testing.
 
-    Returns:
         bytes: PNG image bytes.
     """
     # Create a simple 10x10 white image with a black pixel
@@ -68,7 +66,6 @@ def sample_image_with_text_bytes() -> bytes:
     """
     Create sample image bytes with text for OCR testing.
 
-    Returns:
         bytes: PNG image bytes with text.
     """
     import cv2
@@ -93,7 +90,6 @@ def invalid_image_bytes() -> bytes:
     """
     Create invalid image bytes for testing error handling.
 
-    Returns:
         bytes: Invalid image data.
     """
     return b"not a valid image"
@@ -104,7 +100,6 @@ def colonial_image_bytes() -> bytes:
     """
     Load real colonial user screenshot for integration testing.
 
-    Returns:
         bytes: PNG image bytes from fixtures.
     """
     import os
@@ -123,7 +118,6 @@ def warden_image_bytes() -> bytes:
     """
     Load real warden user screenshot for integration testing.
 
-    Returns:
         bytes: PNG image bytes from fixtures.
     """
     import os
@@ -142,7 +136,6 @@ def stockpile_image_bytes() -> bytes:
     """
     Load real stockpile screenshot for integration testing.
 
-    Returns:
         bytes: PNG image bytes from fixtures.
     """
     import os
@@ -161,8 +154,6 @@ def reset_settings_cache() -> None:
     """
     Reset settings cache before each test.
 
-    Returns:
-        None
     """
     reload_settings()
 
@@ -172,14 +163,11 @@ def reset_war_state() -> None:
     """
     Reset war state before each test.
 
-    Returns:
-        None
     """
-    from verification_ocr.services.war_service import get_war_state
+    from verification_ocr.services import get_war_service
 
-    state = get_war_state()
-    state.war_number = None
-    state.start_time = None
+    war_service = get_war_service()
+    war_service.initialize(war_number=None, start_time=None)
 
 
 @pytest.fixture
@@ -226,7 +214,6 @@ def test_client(mock_tesseract_available: MagicMock) -> TestClient:
     Args:
         mock_tesseract_available (MagicMock): Mock for tesseract availability.
 
-    Returns:
         TestClient: FastAPI test client.
     """
     from verification_ocr.api.server import app

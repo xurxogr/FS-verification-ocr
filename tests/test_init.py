@@ -10,8 +10,6 @@ class TestPackageInit:
         """
         Test that __version__ is defined.
 
-        Returns:
-            None
         """
         assert hasattr(verification_ocr, "__version__")
 
@@ -19,8 +17,6 @@ class TestPackageInit:
         """
         Test that __version__ is a string.
 
-        Returns:
-            None
         """
         assert isinstance(verification_ocr.__version__, str)
 
@@ -28,8 +24,6 @@ class TestPackageInit:
         """
         Test that __version__ follows semantic versioning format.
 
-        Returns:
-            None
         """
         version = verification_ocr.__version__
         parts = version.split(".")

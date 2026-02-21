@@ -10,8 +10,6 @@ class TestVerification:
         """
         Test creating a Verification with defaults.
 
-        Returns:
-            None
         """
         verification = Verification()
         assert verification.name is None
@@ -25,8 +23,6 @@ class TestVerification:
         """
         Test creating a Verification with values.
 
-        Returns:
-            None
         """
         verification = Verification(
             name="TestPlayer",
@@ -45,8 +41,6 @@ class TestVerification:
         """
         Test Verification model_dump.
 
-        Returns:
-            None
         """
         verification = Verification(
             name="Player1",
@@ -61,8 +55,6 @@ class TestVerification:
         """
         Test Verification with partial data.
 
-        Returns:
-            None
         """
         verification = Verification(
             name="PartialPlayer",

@@ -1,8 +1,8 @@
 """Tests for response models."""
 
-from verification_ocr.models.responses import (
+from verification_ocr.models import (
     HealthResponse,
-    VerificationRequest,
+    Verification,
     VerificationResponse,
     WarResponse,
 )
@@ -15,8 +15,6 @@ class TestHealthResponse:
         """
         Test creating a HealthResponse.
 
-        Returns:
-            None
         """
         response = HealthResponse(
             status="healthy",
@@ -29,8 +27,6 @@ class TestHealthResponse:
         """
         Test HealthResponse with tesseract_version.
 
-        Returns:
-            None
         """
         response = HealthResponse(
             status="healthy",
@@ -43,8 +39,6 @@ class TestHealthResponse:
         """
         Test HealthResponse tesseract_version defaults to None.
 
-        Returns:
-            None
         """
         response = HealthResponse(
             status="healthy",
@@ -56,8 +50,6 @@ class TestHealthResponse:
         """
         Test HealthResponse model_dump.
 
-        Returns:
-            None
         """
         response = HealthResponse(
             status="healthy",
@@ -68,20 +60,6 @@ class TestHealthResponse:
         assert data["version"] == "1.0.0"
 
 
-class TestVerificationRequest:
-    """Tests for VerificationRequest model."""
-
-    def test_create_verification_request(self) -> None:
-        """
-        Test creating a VerificationRequest.
-
-        Returns:
-            None
-        """
-        request = VerificationRequest()
-        assert request is not None
-
-
 class TestVerificationResponse:
     """Tests for VerificationResponse model."""
 
@@ -89,23 +67,19 @@ class TestVerificationResponse:
         """
         Test creating a successful VerificationResponse.
 
-        Returns:
-            None
         """
         response = VerificationResponse(
             success=True,
-            verification={"name": "TestUser", "level": 10},
+            verification=Verification(name="TestUser", level=10),
         )
         assert response.success is True
         assert response.error is None
-        assert response.verification["name"] == "TestUser"
+        assert response.verification.name == "TestUser"
 
     def test_verification_response_default_values(self) -> None:
         """
         Test VerificationResponse default values.
 
-        Returns:
-            None
         """
         response = VerificationResponse(success=True)
         assert response.error is None
@@ -115,8 +89,6 @@ class TestVerificationResponse:
         """
         Test VerificationResponse for failure case.
 
-        Returns:
-            None
         """
         response = VerificationResponse(
             success=False,
@@ -130,12 +102,10 @@ class TestVerificationResponse:
         """
         Test VerificationResponse model_dump.
 
-        Returns:
-            None
         """
         response = VerificationResponse(
             success=True,
-            verification={"name": "Player1"},
+            verification=Verification(name="Player1"),
         )
         data = response.model_dump()
         assert data["success"] is True
@@ -145,24 +115,22 @@ class TestVerificationResponse:
         """
         Test VerificationResponse with full verification data.
 
-        Returns:
-            None
         """
         response = VerificationResponse(
             success=True,
-            verification={
-                "name": "TestPlayer",
-                "level": 25,
-                "regiment": True,
-                "colonial": False,
-                "shard": "ABLE",
-            },
+            verification=Verification(
+                name="TestPlayer",
+                level=25,
+                regiment="[TAG] My Regiment",
+                colonial=False,
+                shard="ABLE",
+            ),
         )
-        assert response.verification["name"] == "TestPlayer"
-        assert response.verification["level"] == 25
-        assert response.verification["regiment"] is True
-        assert response.verification["colonial"] is False
-        assert response.verification["shard"] == "ABLE"
+        assert response.verification.name == "TestPlayer"
+        assert response.verification.level == 25
+        assert response.verification.regiment == "[TAG] My Regiment"
+        assert response.verification.colonial is False
+        assert response.verification.shard == "ABLE"
 
 
 class TestWarResponse:
@@ -172,8 +140,6 @@ class TestWarResponse:
         """
         Test creating a WarResponse.
 
-        Returns:
-            None
         """
         response = WarResponse(
             war_number=132,
@@ -192,8 +158,6 @@ class TestWarResponse:
         """
         Test WarResponse default values are None.
 
-        Returns:
-            None
         """
         response = WarResponse()
         assert response.war_number is None
@@ -206,8 +170,6 @@ class TestWarResponse:
         """
         Test WarResponse model_dump.
 
-        Returns:
-            None
         """
         response = WarResponse(
             war_number=132,
@@ -225,8 +187,6 @@ class TestWarResponse:
         """
         Test WarResponse with partial values.
 
-        Returns:
-            None
         """
         response = WarResponse(war_number=132)
         assert response.war_number == 132

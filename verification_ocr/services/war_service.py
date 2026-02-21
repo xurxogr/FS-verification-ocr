@@ -1,102 +1,103 @@
 """War service - fetches and manages war state from Foxhole API."""
 
 import logging
+from functools import lru_cache
 
 import httpx
+
+from verification_ocr.models import WarState
 
 logger = logging.getLogger(__name__)
 
 FOXHOLE_WAR_API_URL = "https://war-service-live.foxholeservices.com/api/worldconquest/war"
 
 
-class WarState:
-    """Holds the current war state."""
+class WarService:
+    """Service for managing war state."""
 
     def __init__(self) -> None:
+        """Initialize war service with empty state."""
+        self._state = WarState()
+
+    @property
+    def state(self) -> WarState:
         """
-        Initialize war state.
+        Get the current war state.
 
         Returns:
-            None
+            WarState: The current war state.
         """
-        self.war_number: int | None = None
-        self.start_time: int | None = None
+        return self._state
 
-    def is_configured(self) -> bool:
+    def initialize(
+        self,
+        war_number: int | None = None,
+        start_time: int | None = None,
+    ) -> None:
         """
-        Check if war state is configured.
+        Initialize war state from settings.
+
+        Args:
+            war_number: War number from settings.
+            start_time: Start time from settings.
+        """
+        self._state = WarState(war_number=war_number, start_time=start_time)
+
+    async def fetch_from_api(self) -> WarState | None:
+        """
+        Fetch war data from Foxhole API.
 
         Returns:
-            bool: True if both war_number and start_time are set.
+            WarState | None: War state if successful, None otherwise.
         """
-        return self.war_number is not None and self.start_time is not None
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.get(FOXHOLE_WAR_API_URL)
+                response.raise_for_status()
+                data = response.json()
 
+                war_number = data.get("warNumber")
+                start_time = data.get("conquestStartTime")
 
-# Global war state instance
-_war_state = WarState()
+                if war_number is not None and start_time is not None:
+                    logger.info(
+                        f"Fetched war data from API: War {war_number}, start_time {start_time}"
+                    )
+                    return WarState(war_number=war_number, start_time=start_time)
 
-
-def get_war_state() -> WarState:
-    """
-    Get the global war state instance.
-
-    Returns:
-        WarState: The global war state.
-    """
-    return _war_state
-
-
-async def sync_war_from_api() -> bool:
-    """
-    Fetch war data from Foxhole API and update the war state.
-
-    Returns:
-        bool: True if sync was successful, False otherwise.
-    """
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.get(FOXHOLE_WAR_API_URL)
-            response.raise_for_status()
-            data = response.json()
-
-            war_number = data.get("warNumber")
-            start_time = data.get("conquestStartTime")
-
-            if war_number is not None and start_time is not None:
-                _war_state.war_number = war_number
-                _war_state.start_time = start_time
-                logger.info(f"Synced war data from API: War {war_number}, start_time {start_time}")
-                return True
-            else:
                 logger.warning("API response missing warNumber or conquestStartTime")
-                return False
+                return None
 
-    except httpx.HTTPStatusError as e:
-        logger.error(f"HTTP error fetching war data: {e}")
-        return False
-    except httpx.RequestError as e:
-        logger.error(f"Request error fetching war data: {e}")
-        return False
-    except Exception as e:
-        logger.error(f"Unexpected error fetching war data: {e}")
+        except httpx.HTTPStatusError as e:
+            logger.error(f"HTTP error fetching war data: {e}")
+            return None
+        except httpx.RequestError as e:
+            logger.error(f"Request error fetching war data: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"Unexpected error fetching war data: {e}")
+            return None
+
+    async def sync_from_api(self) -> bool:
+        """
+        Fetch war data from Foxhole API and update the state.
+
+        Returns:
+            bool: True if sync was successful, False otherwise.
+        """
+        result = await self.fetch_from_api()
+        if result is not None:
+            self._state = result
+            return True
         return False
 
 
-def initialize_war_state_from_settings(
-    war_number: int | None,
-    start_time: int | None,
-) -> None:
+@lru_cache
+def get_war_service() -> WarService:
     """
-    Initialize war state from settings.
-
-    Args:
-        war_number (int | None): War number from settings.
-        start_time (int | None): Start time from settings.
+    Get the war service singleton.
 
     Returns:
-        None
+        WarService: The war service instance.
     """
-    if war_number is not None:
-        _war_state.war_number = war_number
-    if start_time is not None:
-        _war_state.start_time = start_time
+    return WarService()

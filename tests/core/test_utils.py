@@ -21,8 +21,6 @@ class TestGetTesseractVersion:
         Args:
             mock_tesseract_available (MagicMock): Mock for tesseract availability.
 
-        Returns:
-            None
         """
         result = get_tesseract_version()
         assert result == "tesseract 5.0.0"
@@ -34,8 +32,6 @@ class TestGetTesseractVersion:
         Args:
             mock_tesseract_unavailable (MagicMock): Mock for tesseract unavailability.
 
-        Returns:
-            None
         """
         result = get_tesseract_version()
         assert result is None
@@ -44,8 +40,6 @@ class TestGetTesseractVersion:
         """
         Test when tesseract returns empty output.
 
-        Returns:
-            None
         """
         with patch(
             "verification_ocr.core.utils.shutil.which",
@@ -64,8 +58,6 @@ class TestGetTesseractVersion:
         """
         Test when tesseract command times out.
 
-        Returns:
-            None
         """
         with patch(
             "verification_ocr.core.utils.shutil.which",
@@ -82,8 +74,6 @@ class TestGetTesseractVersion:
         """
         Test when subprocess raises an error.
 
-        Returns:
-            None
         """
         with patch(
             "verification_ocr.core.utils.shutil.which",
@@ -100,8 +90,6 @@ class TestGetTesseractVersion:
         """
         Test when OSError is raised.
 
-        Returns:
-            None
         """
         with patch(
             "verification_ocr.core.utils.shutil.which",
@@ -122,8 +110,6 @@ class TestHealthCheckFilter:
         """
         Test that GET /health requests are filtered out.
 
-        Returns:
-            None
         """
         filter_instance = HealthCheckFilter()
         record = logging.LogRecord(
@@ -141,8 +127,6 @@ class TestHealthCheckFilter:
         """
         Test that non-health check requests are allowed.
 
-        Returns:
-            None
         """
         filter_instance = HealthCheckFilter()
         record = logging.LogRecord(
@@ -160,8 +144,6 @@ class TestHealthCheckFilter:
         """
         Test that POST to /health is allowed (only GET is filtered).
 
-        Returns:
-            None
         """
         filter_instance = HealthCheckFilter()
         record = logging.LogRecord(
@@ -183,8 +165,6 @@ class TestSetupLogging:
         """
         Test setup_logging with default settings.
 
-        Returns:
-            None
         """
         from verification_ocr.core.settings.app_settings import LoggingSettings
 
@@ -198,8 +178,6 @@ class TestSetupLogging:
         """
         Test setup_logging with custom level.
 
-        Returns:
-            None
         """
         from verification_ocr.core.settings.app_settings import LoggingSettings
 
@@ -213,8 +191,6 @@ class TestSetupLogging:
         """
         Test setup_logging with custom logger levels.
 
-        Returns:
-            None
         """
         from verification_ocr.core.settings.app_settings import LoggingSettings
 
@@ -234,8 +210,6 @@ class TestSetupLogging:
         Args:
             tmp_path: Pytest fixture for temporary directory.
 
-        Returns:
-            None
         """
         from verification_ocr.core.settings.app_settings import LoggingSettings
 
@@ -256,8 +230,6 @@ class TestSetupLogging:
         """
         Test that health check filter is added to uvicorn.access logger.
 
-        Returns:
-            None
         """
         from verification_ocr.core.settings.app_settings import LoggingSettings
         from verification_ocr.core.utils import HealthCheckFilter
@@ -278,8 +250,6 @@ class TestSetupLogging:
         Args:
             tmp_path: Pytest fixture for temporary directory.
 
-        Returns:
-            None
         """
         from logging.handlers import TimedRotatingFileHandler
 

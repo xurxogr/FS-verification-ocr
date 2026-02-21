@@ -8,10 +8,11 @@ import time
 import cv2
 import numpy as np
 import pytesseract
+from cv2.typing import MatLike
 
 from verification_ocr.core.settings import AppSettings
-from verification_ocr.models import Verification
-from verification_ocr.services.war_service import get_war_state
+from verification_ocr.models import ImageRegions, Region, Verification, VerificationResponse
+from verification_ocr.services.war_service import get_war_service
 
 logger = logging.getLogger(__name__)
 
@@ -105,13 +106,13 @@ def get_current_ingame_time() -> tuple[int, int, int] | None:
     Returns:
         tuple[int, int, int] | None: (day, hour, minute) or None if not configured.
     """
-    war_state = get_war_state()
+    war_service = get_war_service()
 
-    if war_state.start_time is None:
+    if war_service.state.start_time is None:
         return None
 
     current_time_ms = int(time.time() * 1000)
-    elapsed_ms = current_time_ms - war_state.start_time
+    elapsed_ms = current_time_ms - war_service.state.start_time
     elapsed_hours = elapsed_ms / (1000 * 60 * 60)
 
     # 1 real hour = 1 in-game day (game starts at Day 1)
@@ -132,9 +133,6 @@ class VerificationService:
 
         Args:
             settings (AppSettings): Application settings instance.
-
-        Returns:
-            None
         """
         self.settings = settings
         if settings.ocr.tesseract_cmd:
@@ -376,7 +374,7 @@ class VerificationService:
     def _calculate_regions(
         self,
         image: cv2.typing.MatLike,
-    ) -> dict:
+    ) -> ImageRegions:
         """
         Calculate region coordinates based on image dimensions.
 
@@ -386,7 +384,7 @@ class VerificationService:
             image (cv2.typing.MatLike): Image to calculate regions for.
 
         Returns:
-            dict: Dictionary with region coordinates.
+            ImageRegions: Calculated region coordinates.
         """
         height, width = image.shape[:2]
         scale_factor = height / self.settings.ocr.base_height
@@ -408,44 +406,44 @@ class VerificationService:
         row_y1 = int(0.62 * py)
         row_y2 = int(0.775 * py)
 
-        return {
-            "username": {
-                "y1": row_y1,
-                "y2": row_y2,
-                "x1": int(1.81 * px),
-                "x2": int(2.25 * px),
-            },
-            "icon": {
-                "y1": row_y1,
-                "y2": row_y2,
-                "x1": int(2.34 * px),
-                "x2": int(2.49 * px),
-            },
-            "level": {
-                "y1": row_y1,
-                "y2": row_y2,
-                "x1": int(2.51 * px),
-                "x2": int(2.83 * px),
-            },
-            "regiment": {
-                "y1": int(1.22 * py),
-                "y2": int(1.34 * py),
-                "x1": int(2.42 * px),
-                "x2": int(3.5 * px),
-            },
-            "shard": {
-                "y1": shard_y,
-                "y2": shard_y + shard_height,
-                "x1": shard_x,
-                "x2": shard_x + shard_width,
-            },
-            "scale_factor": scale_factor,
-        }
+        return ImageRegions(
+            username=Region(
+                y1=row_y1,
+                y2=row_y2,
+                x1=int(1.81 * px),
+                x2=int(2.25 * px),
+            ),
+            icon=Region(
+                y1=row_y1,
+                y2=row_y2,
+                x1=int(2.34 * px),
+                x2=int(2.49 * px),
+            ),
+            level=Region(
+                y1=row_y1,
+                y2=row_y2,
+                x1=int(2.51 * px),
+                x2=int(2.83 * px),
+            ),
+            regiment=Region(
+                y1=int(1.22 * py),
+                y2=int(1.34 * py),
+                x1=int(2.42 * px),
+                x2=int(3.5 * px),
+            ),
+            shard=Region(
+                y1=shard_y,
+                y2=shard_y + shard_height,
+                x1=shard_x,
+                x2=shard_x + shard_width,
+            ),
+            scale_factor=scale_factor,
+        )
 
     def _save_debug_image(
         self,
         image: cv2.typing.MatLike,
-        regions: dict,
+        regions: ImageRegions,
         filename: str,
     ) -> None:
         """
@@ -453,29 +451,26 @@ class VerificationService:
 
         Args:
             image (cv2.typing.MatLike): Original image.
-            regions (dict): Region coordinates dictionary.
+            regions (ImageRegions): Region coordinates.
             filename (str): Output filename.
-
-        Returns:
-            None
         """
         debug_img = image.copy()
-        scale = regions["scale_factor"]
+        scale = regions.scale_factor
         thickness = max(1, int(2 * scale))
 
         # Draw username region (green)
-        r = regions["username"]
+        r = regions.username
         cv2.rectangle(
             img=debug_img,
-            pt1=(r["x1"], r["y1"]),
-            pt2=(r["x2"], r["y2"]),
+            pt1=(r.x1, r.y1),
+            pt2=(r.x2, r.y2),
             color=(0, 255, 0),
             thickness=thickness,
         )
         cv2.putText(
             img=debug_img,
             text="USERNAME",
-            org=(r["x1"], r["y1"] - 5),
+            org=(r.x1, r.y1 - 5),
             fontFace=cv2.FONT_HERSHEY_SIMPLEX,
             fontScale=scale * 0.5,
             color=(0, 255, 0),
@@ -483,18 +478,18 @@ class VerificationService:
         )
 
         # Draw icon region (yellow)
-        r = regions["icon"]
+        r = regions.icon
         cv2.rectangle(
             img=debug_img,
-            pt1=(r["x1"], r["y1"]),
-            pt2=(r["x2"], r["y2"]),
+            pt1=(r.x1, r.y1),
+            pt2=(r.x2, r.y2),
             color=(0, 255, 255),
             thickness=thickness,
         )
         cv2.putText(
             img=debug_img,
             text="ICON",
-            org=(r["x1"], r["y1"] - 5),
+            org=(r.x1, r.y1 - 5),
             fontFace=cv2.FONT_HERSHEY_SIMPLEX,
             fontScale=scale * 0.5,
             color=(0, 255, 255),
@@ -502,18 +497,18 @@ class VerificationService:
         )
 
         # Draw level region (orange)
-        r = regions["level"]
+        r = regions.level
         cv2.rectangle(
             img=debug_img,
-            pt1=(r["x1"], r["y1"]),
-            pt2=(r["x2"], r["y2"]),
+            pt1=(r.x1, r.y1),
+            pt2=(r.x2, r.y2),
             color=(0, 165, 255),
             thickness=thickness,
         )
         cv2.putText(
             img=debug_img,
             text="LEVEL",
-            org=(r["x1"], r["y1"] - 5),
+            org=(r.x1, r.y1 - 5),
             fontFace=cv2.FONT_HERSHEY_SIMPLEX,
             fontScale=scale * 0.5,
             color=(0, 165, 255),
@@ -521,18 +516,18 @@ class VerificationService:
         )
 
         # Draw regiment region (magenta)
-        r = regions["regiment"]
+        r = regions.regiment
         cv2.rectangle(
             img=debug_img,
-            pt1=(r["x1"], r["y1"]),
-            pt2=(r["x2"], r["y2"]),
+            pt1=(r.x1, r.y1),
+            pt2=(r.x2, r.y2),
             color=(255, 0, 255),
             thickness=thickness,
         )
         cv2.putText(
             img=debug_img,
             text="REGIMENT",
-            org=(r["x1"], r["y1"] - 5),
+            org=(r.x1, r.y1 - 5),
             fontFace=cv2.FONT_HERSHEY_SIMPLEX,
             fontScale=scale * 0.5,
             color=(255, 0, 255),
@@ -540,18 +535,18 @@ class VerificationService:
         )
 
         # Draw shard region (cyan)
-        r = regions["shard"]
+        r = regions.shard
         cv2.rectangle(
             img=debug_img,
-            pt1=(r["x1"], r["y1"]),
-            pt2=(r["x2"], r["y2"]),
+            pt1=(r.x1, r.y1),
+            pt2=(r.x2, r.y2),
             color=(255, 255, 0),
             thickness=thickness,
         )
         cv2.putText(
             img=debug_img,
             text="SHARD/TIME",
-            org=(r["x1"], r["y1"] - 5),
+            org=(r.x1, r.y1 - 5),
             fontFace=cv2.FONT_HERSHEY_SIMPLEX,
             fontScale=scale * 0.5,
             color=(255, 255, 0),
@@ -565,7 +560,7 @@ class VerificationService:
     def _find_user_info(
         self,
         image: cv2.typing.MatLike,
-        regions: dict,
+        regions: ImageRegions,
     ) -> Verification:
         """
         Extract user information from the image.
@@ -574,7 +569,7 @@ class VerificationService:
 
         Args:
             image (cv2.typing.MatLike): Image to extract user information from.
-            regions (dict): Pre-calculated region coordinates.
+            regions (ImageRegions): Pre-calculated region coordinates.
 
         Returns:
             Verification: User information.
@@ -582,8 +577,8 @@ class VerificationService:
         data = Verification()
 
         # Extract username from dedicated region
-        r = regions["username"]
-        username_image = image[r["y1"] : r["y2"], r["x1"] : r["x2"]]
+        r = regions.username
+        username_image = image[r.y1 : r.y2, r.x1 : r.x2]
         username_text = self._extract_text_from_image(username_image)
         data.name = username_text.strip() if username_text.strip() else None
 
@@ -592,8 +587,8 @@ class VerificationService:
             return data
 
         # Extract level from dedicated region (language-agnostic: look for : and digits)
-        r = regions["level"]
-        level_image = image[r["y1"] : r["y2"], r["x1"] : r["x2"]]
+        r = regions.level
+        level_image = image[r.y1 : r.y2, r.x1 : r.x2]
         level_text = self._extract_text_from_image(level_image)
         # Look for colon and extract digits after it
         if ":" in level_text:
@@ -603,13 +598,13 @@ class VerificationService:
                 data.level = int(digits)
 
         # Check for colonial faction icon in icon region
-        r = regions["icon"]
-        icon_image = image[r["y1"] : r["y2"], r["x1"] : r["x2"]]
+        r = regions.icon
+        icon_image = image[r.y1 : r.y2, r.x1 : r.x2]
         data.colonial = self._find_colonial_icon(icon_image)
 
         # Extract Regiment name from grey bar region
-        r = regions["regiment"]
-        regiment_image = image[r["y1"] : r["y2"], r["x1"] : r["x2"]]
+        r = regions.regiment
+        regiment_image = image[r.y1 : r.y2, r.x1 : r.x2]
         regiment_text = self._extract_text_from_image(regiment_image, scale=True)
         data.regiment = self._parse_regiment_name(regiment_text)
 
@@ -658,7 +653,7 @@ class VerificationService:
     def _get_shard_and_time(
         self,
         image: cv2.typing.MatLike,
-        regions: dict,
+        regions: ImageRegions,
     ) -> tuple[str | None, str | None]:
         """
         Extract shard and in-game time from the image.
@@ -667,19 +662,19 @@ class VerificationService:
 
         Args:
             image (cv2.typing.MatLike): Image to extract shard from.
-            regions (dict): Pre-calculated region coordinates.
+            regions (ImageRegions): Pre-calculated region coordinates.
 
         Returns:
             tuple[str | None, str | None]: (shard, ingame_time) tuple.
         """
-        r = regions["shard"]
-        shard_image = image[r["y1"] : r["y2"], r["x1"] : r["x2"]]
+        r = regions.shard
+        shard_image = image[r.y1 : r.y2, r.x1 : r.x2]
 
         if shard_image.size == 0:
             return None, None
 
         # Preprocess using foxhole_stockpiles method
-        scale_factor = regions["scale_factor"]
+        scale_factor = regions.scale_factor
         processed_image = self._prepare_image_for_shard_detection(
             image=shard_image,
             scale_factor=scale_factor,
@@ -711,7 +706,7 @@ class VerificationService:
 
         return shard, ingame_time
 
-    def verify(self, image1_bytes: bytes, image2_bytes: bytes) -> dict:
+    def verify(self, image1_bytes: bytes, image2_bytes: bytes) -> VerificationResponse:
         """
         Process two images and extract user verification information.
 
@@ -720,12 +715,12 @@ class VerificationService:
             image2_bytes (bytes): Second image bytes.
 
         Returns:
-            dict: Verification result dictionary with user info or error.
+            VerificationResponse: Verification result with user info or error.
         """
         logger.info("Processing image pair for verification")
 
         # Decode images
-        images = []
+        images: list[MatLike | None] = []
         for img_bytes in [image1_bytes, image2_bytes]:
             nparr = np.frombuffer(buffer=img_bytes, dtype=np.uint8)
             img = cv2.imdecode(buf=nparr, flags=cv2.IMREAD_COLOR)
@@ -733,11 +728,10 @@ class VerificationService:
 
         # Check if images were decoded successfully
         if images[0] is None or images[1] is None:
-            return {
-                "success": False,
-                "error": "Failed to decode one or both images",
-                "verification": None,
-            }
+            return VerificationResponse(
+                success=False,
+                error="Failed to decode one or both images",
+            )
 
         # Calculate regions for both images
         regions1 = self._calculate_regions(images[0])
@@ -774,11 +768,10 @@ class VerificationService:
         verification.ingame_time = ingame_time
 
         if verification.name is None:
-            return {
-                "success": False,
-                "error": "No name found in any of the images",
-                "verification": None,
-            }
+            return VerificationResponse(
+                success=False,
+                error="No name found in any of the images",
+            )
 
         # Validate in-game time difference
         if ingame_time is not None:
@@ -795,17 +788,16 @@ class VerificationService:
 
                 max_diff = self.settings.verification.max_ingame_time_diff
                 if time_diff > max_diff:
-                    return {
-                        "success": False,
-                        "error": (
+                    return VerificationResponse(
+                        success=False,
+                        error=(
                             f"In-game time difference is {time_diff} hours "
                             f"(max allowed: {max_diff})"
                         ),
-                        "verification": verification.model_dump(),
-                    }
+                        verification=verification,
+                    )
 
-        return {
-            "success": True,
-            "error": None,
-            "verification": verification.model_dump(),
-        }
+        return VerificationResponse(
+            success=True,
+            verification=verification,
+        )

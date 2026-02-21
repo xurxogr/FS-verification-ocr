@@ -26,7 +26,6 @@ class HealthCheckFilter(logging.Filter):
         Args:
             record (logging.LogRecord): Log record to check.
 
-        Returns:
             bool: False to exclude the record, True to include it.
         """
         message = record.getMessage()
@@ -40,7 +39,6 @@ def get_tesseract_version() -> str | None:
     """
     Get Tesseract version string.
 
-    Returns:
         str | None: Version string if tesseract is available, None otherwise.
     """
     tesseract_path = shutil.which("tesseract")
@@ -72,7 +70,6 @@ def _get_handler_by_name(root_logger: logging.Logger, name: str) -> logging.Hand
         root_logger (logging.Logger): Logger to search.
         name (str): Handler name to find.
 
-    Returns:
         logging.Handler | None: Handler if found, None otherwise.
     """
     for handler in root_logger.handlers:
@@ -89,8 +86,6 @@ def _remove_handler_by_name(root_logger: logging.Logger, name: str) -> None:
         root_logger (logging.Logger): Logger to remove from.
         name (str): Handler name to remove.
 
-    Returns:
-        None
     """
     handler = _get_handler_by_name(root_logger=root_logger, name=name)
     if handler:
@@ -106,7 +101,6 @@ def _get_min_level(root_level: str, loggers: dict[str, str]) -> int:
         root_level (str): The root logger level string.
         loggers (dict[str, str]): Dict of logger name to level string.
 
-    Returns:
         int: The minimum numeric log level.
     """
     levels: list[int] = [logging.getLevelName(root_level.upper())]
@@ -122,8 +116,6 @@ def setup_logging(settings: LoggingSettings) -> None:
     Args:
         settings (LoggingSettings): Logging settings to configure logging.
 
-    Returns:
-        None
     """
     root_logger = logging.getLogger()
 

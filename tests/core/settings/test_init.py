@@ -10,8 +10,6 @@ class TestGetSettings:
         """
         Test that get_settings returns AppSettings instance.
 
-        Returns:
-            None
         """
         settings = get_settings()
         assert isinstance(settings, AppSettings)
@@ -20,8 +18,6 @@ class TestGetSettings:
         """
         Test that get_settings returns the same cached instance.
 
-        Returns:
-            None
         """
         settings1 = get_settings()
         settings2 = get_settings()
@@ -31,8 +27,6 @@ class TestGetSettings:
         """
         Test that settings has api_server attribute.
 
-        Returns:
-            None
         """
         settings = get_settings()
         assert hasattr(settings, "api_server")
@@ -41,8 +35,6 @@ class TestGetSettings:
         """
         Test that settings has ocr attribute.
 
-        Returns:
-            None
         """
         settings = get_settings()
         assert hasattr(settings, "ocr")
@@ -51,8 +43,6 @@ class TestGetSettings:
         """
         Test that settings has logging attribute.
 
-        Returns:
-            None
         """
         settings = get_settings()
         assert hasattr(settings, "logging")
@@ -65,8 +55,6 @@ class TestReloadSettings:
         """
         Test that reload_settings returns AppSettings instance.
 
-        Returns:
-            None
         """
         settings = reload_settings()
         assert isinstance(settings, AppSettings)
@@ -75,8 +63,6 @@ class TestReloadSettings:
         """
         Test that reload_settings clears the cache.
 
-        Returns:
-            None
         """
         settings1 = get_settings()
         settings2 = reload_settings()
@@ -87,8 +73,6 @@ class TestReloadSettings:
         """
         Test that get_settings returns new instance after reload.
 
-        Returns:
-            None
         """
         settings1 = get_settings()
         reload_settings()

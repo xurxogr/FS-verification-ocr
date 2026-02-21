@@ -10,7 +10,6 @@ def get_settings() -> AppSettings:
     """
     Get cached application settings singleton.
 
-    Returns:
         AppSettings: The application settings instance.
     """
     return AppSettings()
@@ -20,7 +19,6 @@ def reload_settings() -> AppSettings:
     """
     Clear settings cache and reload.
 
-    Returns:
         AppSettings: The newly loaded application settings instance.
     """
     get_settings.cache_clear()
