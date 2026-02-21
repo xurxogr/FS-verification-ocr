@@ -2,6 +2,7 @@
 
 import logging
 import os
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from typing import Annotated, Any
 
@@ -32,7 +33,9 @@ limiter = Limiter(key_func=get_remote_address)
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     """Middleware to add security headers to all responses."""
 
-    async def dispatch(self, request: Request, call_next) -> Response:
+    async def dispatch(
+        self, request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
         """Add security headers to response."""
         response = await call_next(request)
         response.headers["X-Frame-Options"] = "DENY"
@@ -57,7 +60,7 @@ def rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded) -> Res
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """
     Application lifespan manager.
 
@@ -65,6 +68,7 @@ async def lifespan(app: FastAPI):
         app (FastAPI): The FastAPI application instance.
 
     Yields:
+        None
     """
     settings = get_settings()
 
@@ -98,7 +102,7 @@ async def lifespan(app: FastAPI):
         logger.info("War settings not configured, fetching from Foxhole API...")
         await war_service.sync_from_api()
 
-    if war_service.state.is_configured():
+    if war_service.state.is_configured() and war_service.state.start_time is not None:
         war_day, war_hour, war_minute = calculate_war_time(start_time=war_service.state.start_time)
         logger.info(
             f"War {war_service.state.war_number} - Day {war_day}, {war_hour:02d}:{war_minute:02d}"
@@ -128,7 +132,7 @@ def create_app() -> FastAPI:
 
     # Add rate limiter state and exception handler
     app.state.limiter = limiter
-    app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
+    app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)  # type: ignore[arg-type]
 
     # Security headers middleware
     app.add_middleware(SecurityHeadersMiddleware)

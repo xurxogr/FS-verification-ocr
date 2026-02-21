@@ -204,7 +204,7 @@ class VerificationService:
             processed = enhanced
 
         config = "--psm 7"
-        text = pytesseract.image_to_string(
+        text: str = pytesseract.image_to_string(
             image=processed,
             config=config,
             lang=self.settings.ocr.language,
@@ -684,8 +684,12 @@ class VerificationService:
                     error="Failed to decode one or both images",
                 )
 
+            # Extract decoded images (now guaranteed to be non-None)
+            img1: MatLike = images[0]
+            img2: MatLike = images[1]
+
             # Validate minimum image dimensions
-            for i, img in enumerate(images):
+            for i, img in enumerate([img1, img2]):
                 if img.shape[0] < 100 or img.shape[1] < 100:
                     return VerificationResponse(
                         success=False,
@@ -693,33 +697,33 @@ class VerificationService:
                     )
 
             # Calculate regions for both images
-            regions1 = self._calculate_regions(images[0])
-            regions2 = self._calculate_regions(images[1])
+            regions1 = self._calculate_regions(img1)
+            regions2 = self._calculate_regions(img2)
 
             # Save debug images if debug mode is enabled
             if self.settings.ocr.debug_mode:
                 self._save_debug_image(
-                    image=images[0],
+                    image=img1,
                     regions=regions1,
                     filename="debug_image1_regions.png",
                 )
                 self._save_debug_image(
-                    image=images[1],
+                    image=img2,
                     regions=regions2,
                     filename="debug_image2_regions.png",
                 )
 
             # Try to find user info in first image, fallback to second
-            verification = self._find_user_info(image=images[0], regions=regions1)
+            verification = self._find_user_info(image=img1, regions=regions1)
             if verification.name is None:
-                verification = self._find_user_info(image=images[1], regions=regions2)
+                verification = self._find_user_info(image=img2, regions=regions2)
                 shard, ingame_time = self._get_shard_and_time(
-                    image=images[0],
+                    image=img1,
                     regions=regions1,
                 )
             else:
                 shard, ingame_time = self._get_shard_and_time(
-                    image=images[1],
+                    image=img2,
                     regions=regions2,
                 )
 
