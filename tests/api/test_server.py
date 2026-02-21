@@ -333,12 +333,16 @@ class TestIndexEndpoint:
 
     def test_index_returns_json_when_no_index_html(self, test_client: TestClient) -> None:
         """Test that index returns JSON fallback when index.html doesn't exist."""
-        with patch("verification_ocr.api.server.os.path.exists", return_value=False):
-            response = test_client.get("/")
-            assert response.status_code == 200
-            data = response.json()
-            assert data["message"] == "Verification OCR Service"
-            assert data["docs"] == "/docs"
+        from verification_ocr.core.settings import get_settings
+
+        settings = get_settings()
+        with patch.object(settings.api_server, "serve_frontend", True):
+            with patch("verification_ocr.api.server.os.path.exists", return_value=False):
+                response = test_client.get("/")
+                assert response.status_code == 200
+                data = response.json()
+                assert data["message"] == "Verification OCR Service"
+                assert data["docs"] == "/docs"
 
 
 class TestVerifyEndpoint:
@@ -697,6 +701,53 @@ class TestApiKeyAuthentication:
                 assert response.status_code == 200
 
 
+class TestFrontendServing:
+    """Tests for frontend serving configuration."""
+
+    def test_static_files_not_mounted_when_frontend_disabled(
+        self,
+        mock_tesseract_available: MagicMock,
+    ) -> None:
+        """Test that static files are not mounted when serve_frontend is False."""
+        from verification_ocr.core.settings import get_settings
+
+        settings = get_settings()
+        with patch.object(settings.api_server, "serve_frontend", False):
+            with patch("verification_ocr.api.server.os.path.exists", return_value=True):
+                app_instance = create_app()
+                routes = [route.path for route in app_instance.routes]
+                assert "/static" not in routes
+
+    def test_static_files_mounted_when_frontend_enabled(
+        self,
+        mock_tesseract_available: MagicMock,
+    ) -> None:
+        """Test that static files are mounted when serve_frontend is True."""
+        from verification_ocr.core.settings import get_settings
+
+        settings = get_settings()
+        with patch.object(settings.api_server, "serve_frontend", True):
+            with patch("verification_ocr.api.server.os.path.exists", return_value=True):
+                app_instance = create_app()
+                routes = [route.path for route in app_instance.routes]
+                assert "/static" in routes
+
+    def test_index_returns_json_when_frontend_disabled(
+        self,
+        test_client: TestClient,
+    ) -> None:
+        """Test that index returns JSON when serve_frontend is False."""
+        from verification_ocr.core.settings import get_settings
+
+        settings = get_settings()
+        with patch.object(settings.api_server, "serve_frontend", False):
+            response = test_client.get("/")
+            assert response.status_code == 200
+            data = response.json()
+            assert data["message"] == "Verification OCR Service"
+            assert data["docs"] == "/docs"
+
+
 class TestIndexEndpointSecurity:
     """Tests for index endpoint security features."""
 
@@ -706,19 +757,26 @@ class TestIndexEndpointSecurity:
         tmp_path,
     ) -> None:
         """Test that index returns FileResponse when index.html exists."""
+        from verification_ocr.core.settings import get_settings
+
         # Create a temporary index.html
         index_file = tmp_path / "index.html"
         index_file.write_text("<html><body>Test</body></html>")
 
         static_dir = str(tmp_path)
+        settings = get_settings()
 
-        with patch("verification_ocr.api.server.STATIC_DIR", static_dir):
-            response = test_client.get("/")
+        with patch.object(settings.api_server, "serve_frontend", True):
+            with patch("verification_ocr.api.server.STATIC_DIR", static_dir):
+                response = test_client.get("/")
 
-            assert response.status_code == 200
+                assert response.status_code == 200
 
     def test_index_path_traversal_protection(self, test_client: TestClient) -> None:
         """Test that path traversal in index endpoint is prevented."""
+        from verification_ocr.core.settings import get_settings
+
+        settings = get_settings()
 
         # Mock realpath to simulate path resolving outside STATIC_DIR
         def mock_realpath(path):
@@ -726,11 +784,12 @@ class TestIndexEndpointSecurity:
                 return "/etc/passwd"
             return "/safe/static"
 
-        with patch("verification_ocr.api.server.os.path.realpath", side_effect=mock_realpath):
-            response = test_client.get("/")
+        with patch.object(settings.api_server, "serve_frontend", True):
+            with patch("verification_ocr.api.server.os.path.realpath", side_effect=mock_realpath):
+                response = test_client.get("/")
 
-            # Should return JSON fallback, not file
-            assert response.status_code == 200
-            data = response.json()
-            assert data["message"] == "Verification OCR Service"
-            assert data["docs"] == "/docs"
+                # Should return JSON fallback, not file
+                assert response.status_code == 200
+                data = response.json()
+                assert data["message"] == "Verification OCR Service"
+                assert data["docs"] == "/docs"

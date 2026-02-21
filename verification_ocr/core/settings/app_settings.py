@@ -22,6 +22,9 @@ class APIServerSettings(BaseModel):
     api_key: str | None = Field(
         default=None, description="API key for authentication (None = auth disabled)"
     )
+    serve_frontend: bool = Field(
+        default=True, description="Serve the frontend static files and index page"
+    )
 
 
 class VerificationSettings(BaseModel):

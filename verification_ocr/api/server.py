@@ -143,8 +143,8 @@ def create_app() -> FastAPI:
             allow_headers=["*"],
         )
 
-    # Mount static files for frontend
-    if os.path.exists(STATIC_DIR):
+    # Mount static files for frontend (if enabled)
+    if settings.api_server.serve_frontend and os.path.exists(STATIC_DIR):
         app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
     return app
@@ -160,6 +160,12 @@ async def index() -> FileResponse | dict[str, str]:
 
         FileResponse | dict[str, str]: The index.html file or a JSON message with docs link.
     """
+    settings = get_settings()
+
+    # Return JSON if frontend is disabled
+    if not settings.api_server.serve_frontend:
+        return {"message": "Verification OCR Service", "docs": "/docs"}
+
     index_path = os.path.realpath(os.path.join(STATIC_DIR, "index.html"))
     # Ensure path is within STATIC_DIR (prevent path traversal)
     if not index_path.startswith(os.path.realpath(STATIC_DIR)):
