@@ -227,7 +227,8 @@ class VerificationService:
         """
         Prepare image for shard/time text detection.
 
-        Uses foxhole_stockpiles preprocessing logic with dynamic thresholding.
+        Uses Otsu's thresholding (same as foxhole-stockpiles) to automatically
+        determine optimal threshold based on image histogram.
 
         Args:
             image (cv2.typing.MatLike): Image region to preprocess.
@@ -252,22 +253,12 @@ class VerificationService:
             interpolation=cv2.INTER_CUBIC,
         )
 
-        # Calculate threshold from this region's pixel distribution
-        unique_values, counts = np.unique(upscaled, return_counts=True)
-        most_common_value = unique_values[np.argmax(counts)]
-        threshold_value = most_common_value + 120 * (1 - most_common_value / 255)
-
-        # For shard: use THRESH_BINARY (not inverted) and reduce threshold
-        threshold_mode = cv2.THRESH_BINARY
-        threshold_value -= 30
-
-        # Zero out pixels below threshold
-        upscaled[upscaled < threshold_value] = 0
-
-        # Apply binary threshold
+        # Use Otsu's thresholding (THRESH_BINARY for white text on dark background)
+        # This automatically calculates the optimal threshold from the histogram
+        threshold_mode = cv2.THRESH_BINARY + cv2.THRESH_OTSU
         _, binary = cv2.threshold(
             src=upscaled,
-            thresh=TESSERACT_BINARY_THRESHOLD,
+            thresh=0,
             maxval=255,
             type=threshold_mode,
         )
