@@ -590,7 +590,7 @@ class VerificationService:
         # Extract Regiment name from grey bar region
         r = regions.regiment
         regiment_image = image[r.y1 : r.y2, r.x1 : r.x2]
-        regiment_text = self._extract_text_from_image(regiment_image, scale=True)
+        regiment_text = self._extract_text_from_image(regiment_image, scale=False)
         data.regiment = self._parse_regiment_name(regiment_text)
 
         return data
