@@ -633,6 +633,14 @@ class VerificationService:
         # Remove newlines and extra spaces
         text = " ".join(text.split())
 
+        # Strip spaces from the tag portion (between [ and ])
+        # OCR often introduces spurious spaces in the tag like "[7-HP #8707]" -> "[7-HP#8707]"
+        bracket_end = text.find("]")
+        if bracket_end != -1:
+            tag = text[1:bracket_end]  # Content between [ and ]
+            tag_no_spaces = tag.replace(" ", "")
+            text = "[" + tag_no_spaces + "]" + text[bracket_end + 1 :]
+
         return text if text else None
 
     def _get_shard_and_time(
