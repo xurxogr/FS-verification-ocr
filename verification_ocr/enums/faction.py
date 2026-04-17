@@ -7,4 +7,4 @@ class Faction(StrEnum):
     """Player faction in the game."""
 
     COLONIAL = "colonial"
-    WARDENS = "wardens"
+    WARDEN = "warden"

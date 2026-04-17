@@ -21,6 +21,72 @@ logger = logging.getLogger(__name__)
 # Threshold for binary image conversion (same as foxhole_stockpiles)
 TESSERACT_BINARY_THRESHOLD = 127
 
+# Profile box dimensions at 2160p (4K reference resolution)
+PROFILE_BOX_WIDTH_4K = 1096
+PROFILE_BOX_HEIGHT_4K = 180
+PROFILE_BOX_ASPECT_RATIO = PROFILE_BOX_WIDTH_4K / PROFILE_BOX_HEIGHT_4K  # ~6.09
+
+# Grey box detection tolerances
+GREY_BOX_Y_TOLERANCE = 3  # Pixels tolerance for grouping boxes by y position
+GREY_VALUE_MIN = 20
+GREY_VALUE_MAX = 100
+
+# Grey box size constraints (for filtering candidates)
+GREY_BOX_MIN_HEIGHT = 15
+GREY_BOX_MAX_HEIGHT = 100
+GREY_BOX_MIN_WIDTH = 30
+GREY_BOX_MAX_WIDTH = 500
+
+# Profile box detection thresholds
+BLACK_THRESHOLD_VALUES = [15, 20, 25, 30]
+PROFILE_BOX_MIN_WIDTH = 100
+PROFILE_BOX_MIN_HEIGHT = 20
+PROFILE_BOX_ASPECT_RATIO_TOLERANCE = 0.5
+PROFILE_BOX_MAX_WIDTH_RATIO = 0.50  # Max ratio of box width to image width
+
+# Grey box ratios within profile box (positions relative to box dimensions)
+# Row 1 (username, icon, level, rank)
+GREY_ROW1_Y_START = 0.10
+GREY_ROW1_HEIGHT = 0.367  # 0.467 - 0.10
+USERNAME_X_START = 0.022
+USERNAME_WIDTH = 0.305  # 0.327 - 0.022
+ICON_X_START = 0.389
+ICON_WIDTH = 0.104  # 0.493 - 0.389
+LEVEL_X_START = 0.506
+LEVEL_WIDTH = 0.220  # 0.726 - 0.506
+RANK_X_START = 0.739
+RANK_WIDTH = 0.220  # 0.959 - 0.739
+
+# Regiment region ratios (below profile box)
+REGIMENT_X_START = 0.334
+REGIMENT_X_END = 1.082
+REGIMENT_Y_OFFSET = 0.539  # Below box bottom
+REGIMENT_HEIGHT = 0.283
+
+# Grey region to profile box expansion factors
+GREY_TO_BOX_WIDTH_FACTOR = 1.05
+GREY_TO_BOX_HEIGHT_FACTOR = 1.15
+GREY_TO_BOX_X_OFFSET = 0.02
+GREY_TO_BOX_Y_OFFSET = 0.05
+
+# Template matching threshold
+FACTION_MATCH_THRESHOLD = 0.7
+
+# Minimum candidates for grey box pattern detection
+MIN_GREY_BOX_CANDIDATES = 6
+PROFILE_ROW1_BOX_COUNT = 4
+PROFILE_ROW2_BOX_COUNT = 2
+
+# Shard region positioning
+SHARD_Y_OFFSET_MULTIPLIER = 3
+SHARD_WIDTH_MULTIPLIER = 3.5
+
+# Scale threshold for enabling OCR upscaling (below this, text is too small)
+SCALE_UPSCALE_THRESHOLD = 0.9
+
+# Row distance tolerance factor for grey box pattern detection
+ROW_DISTANCE_TOLERANCE_FACTOR = 1.15
+
 
 def extract_day_and_hour(text: str) -> str:
     """
@@ -143,17 +209,23 @@ class VerificationService:
         # Load faction icons if paths are provided
         self.colonial_icon: cv2.typing.MatLike | None = None
         if settings.ocr.colonial_icon_path:
-            self.colonial_icon = cv2.imread(settings.ocr.colonial_icon_path, cv2.IMREAD_COLOR)
+            self.colonial_icon = cv2.imread(
+                filename=settings.ocr.colonial_icon_path,
+                flags=cv2.IMREAD_COLOR,
+            )
             if self.colonial_icon is None:
                 logger.warning(
                     f"Failed to load colonial icon from {settings.ocr.colonial_icon_path}"
                 )
 
-        self.wardens_icon: cv2.typing.MatLike | None = None
-        if settings.ocr.wardens_icon_path:
-            self.wardens_icon = cv2.imread(settings.ocr.wardens_icon_path, cv2.IMREAD_COLOR)
-            if self.wardens_icon is None:
-                logger.warning(f"Failed to load wardens icon from {settings.ocr.wardens_icon_path}")
+        self.warden_icon: cv2.typing.MatLike | None = None
+        if settings.ocr.warden_icon_path:
+            self.warden_icon = cv2.imread(
+                filename=settings.ocr.warden_icon_path,
+                flags=cv2.IMREAD_COLOR,
+            )
+            if self.warden_icon is None:
+                logger.warning(f"Failed to load warden icon from {settings.ocr.warden_icon_path}")
 
         # Create debug output directory if debug mode is enabled
         if settings.ocr.debug_mode:
@@ -276,7 +348,6 @@ class VerificationService:
         self,
         image: cv2.typing.MatLike,
         template: cv2.typing.MatLike,
-        threshold: float = 0.7,
     ) -> float:
         """
         Match a template against an image region.
@@ -284,7 +355,6 @@ class VerificationService:
         Args:
             image (cv2.typing.MatLike): Image to search in.
             template (cv2.typing.MatLike): Template to search for.
-            threshold: Minimum match value (not used in return, just for reference).
 
         Returns:
             float: Match confidence value (0.0 to 1.0).
@@ -311,7 +381,491 @@ class VerificationService:
         _, max_val, _, _ = cv2.minMaxLoc(result)
         return max_val
 
-    def _detect_faction(self, image: cv2.typing.MatLike) -> Faction | None:
+    def _find_profile_box(
+        self,
+        image: cv2.typing.MatLike,
+    ) -> tuple[tuple[int, int, int, int], list[tuple[int, int, int, int]]] | None:
+        """
+        Detect the black profile box in the image.
+
+        Uses two detection methods:
+        1. Direct black box detection (for full screenshots)
+        2. Grey sub-box pattern detection (for cropped images)
+
+        After detection, validates by checking for a faction icon inside.
+
+        Args:
+            image: Image to search in.
+
+        Returns:
+            Tuple of (box, grey_boxes) or None if not found.
+            box is (x, y, width, height) of the profile box.
+            grey_boxes is list of 4 tuples [username, icon, level, rank].
+        """
+        # Try direct black box detection first
+        box = self._find_profile_box_by_black(image)
+        grey_boxes = None
+
+        # Fallback: detect grey sub-boxes and calculate profile box from them
+        if box is None:
+            result = self._find_grey_boxes_pattern(image)
+            if result is not None:
+                box, grey_boxes = result
+
+        # Validate by checking for faction icon inside
+        if box is None:
+            return None
+
+        # Calculate grey boxes from black box if not directly detected
+        if grey_boxes is None:
+            grey_boxes = self._calculate_grey_boxes_from_black_box(box)
+
+        # grey_boxes[1] is the icon grey box
+        icon_box = grey_boxes[1]
+        icon_region = Region(
+            x1=icon_box[0],
+            y1=icon_box[1],
+            x2=icon_box[0] + icon_box[2],
+            y2=icon_box[1] + icon_box[3],
+        )
+
+        faction = self._detect_faction_with_scaled_template(
+            image=image,
+            icon_region=icon_region,
+            threshold=FACTION_MATCH_THRESHOLD,
+        )
+        if faction is None:
+            return None
+
+        return (box, grey_boxes)
+
+    def _find_profile_box_by_black(
+        self,
+        image: cv2.typing.MatLike,
+    ) -> tuple[int, int, int, int] | None:
+        """
+        Detect profile box by finding black rectangle with correct aspect ratio.
+
+        Args:
+            image: Image to search in.
+
+        Returns:
+            Tuple (x, y, width, height) or None if not found.
+        """
+        img_h, img_w = image.shape[:2]
+        gray = cv2.cvtColor(src=image, code=cv2.COLOR_BGR2GRAY)
+
+        best_match = None
+        best_score = float("inf")
+
+        for thresh in BLACK_THRESHOLD_VALUES:
+            _, black_mask = cv2.threshold(
+                src=gray,
+                thresh=thresh,
+                maxval=255,
+                type=cv2.THRESH_BINARY_INV,
+            )
+            contours, _ = cv2.findContours(
+                image=black_mask,
+                mode=cv2.RETR_EXTERNAL,
+                method=cv2.CHAIN_APPROX_SIMPLE,
+            )
+
+            for cnt in contours:
+                x, y, w, h = cv2.boundingRect(cnt)
+                if w < PROFILE_BOX_MIN_WIDTH or h < PROFILE_BOX_MIN_HEIGHT or h == 0:
+                    continue
+
+                ratio = w / h
+                ratio_diff = abs(ratio - PROFILE_BOX_ASPECT_RATIO)
+
+                if ratio_diff >= PROFILE_BOX_ASPECT_RATIO_TOLERANCE:
+                    continue
+
+                # Reject boxes at origin or too large (merging with background)
+                if x == 0 and y == 0:
+                    continue
+                if w / img_w > PROFILE_BOX_MAX_WIDTH_RATIO:
+                    continue
+
+                if ratio_diff < best_score:
+                    best_score = ratio_diff
+                    best_match = (x, y, w, h)
+
+        return best_match
+
+    def _find_grey_boxes_pattern(
+        self,
+        image: cv2.typing.MatLike,
+    ) -> tuple[tuple[int, int, int, int], list[tuple[int, int, int, int]]] | None:
+        """
+        Find the 4+2 grey box pattern and return both the profile box and grey boxes.
+
+        Looks for 4 grey boxes in row 1 followed by 2 grey boxes in row 2.
+
+        Args:
+            image: Image to search in.
+
+        Returns:
+            Tuple of (profile_box, grey_boxes) or None if not found.
+            grey_boxes contains [username, icon, level, rank] sorted by x position.
+        """
+        gray = cv2.cvtColor(src=image, code=cv2.COLOR_BGR2GRAY)
+
+        # Find grey regions (profile sub-boxes are grey)
+        grey_mask = cv2.inRange(
+            src=gray,
+            lowerb=np.array([GREY_VALUE_MIN]),
+            upperb=np.array([GREY_VALUE_MAX]),
+        )
+        contours, _ = cv2.findContours(
+            image=grey_mask,
+            mode=cv2.RETR_EXTERNAL,
+            method=cv2.CHAIN_APPROX_SIMPLE,
+        )
+
+        # Filter for rectangular regions that could be profile sub-boxes
+        candidates = []
+        for cnt in contours:
+            x, y, w, h = cv2.boundingRect(cnt)
+            if (
+                GREY_BOX_MIN_HEIGHT < h < GREY_BOX_MAX_HEIGHT
+                and GREY_BOX_MIN_WIDTH < w < GREY_BOX_MAX_WIDTH
+            ):
+                candidates.append((x, y, w, h))
+
+        if len(candidates) < MIN_GREY_BOX_CANDIDATES:
+            return None
+
+        # Group by similar y position
+        rows: dict[int, list[tuple[int, int, int, int]]] = {}
+        for box in candidates:
+            x, y, w, h = box
+            row_key = None
+            for ry in rows:
+                if abs(ry - y) < GREY_BOX_Y_TOLERANCE:
+                    row_key = ry
+                    break
+            if row_key is None:
+                row_key = y
+                rows[row_key] = []
+            rows[row_key].append(box)
+
+        # Look for 4+2 pattern: row with 4 boxes followed by row with 2 boxes
+        sorted_row_ys = sorted(rows.keys())
+
+        for i, row_y in enumerate(sorted_row_ys):
+            if len(rows[row_y]) != PROFILE_ROW1_BOX_COUNT:
+                continue
+
+            row1_boxes = rows[row_y]
+            row2_y = self._find_row2_below(
+                row1_y=row_y,
+                row1_boxes=row1_boxes,
+                sorted_row_ys=sorted_row_ys[i + 1 :],
+                rows=rows,
+            )
+
+            if row2_y is None:
+                continue
+
+            row2_boxes = rows[row2_y]
+            return self._calculate_profile_box_from_rows(row1_boxes, row2_boxes)
+
+        return None
+
+    def _find_row2_below(
+        self,
+        row1_y: int,
+        row1_boxes: list[tuple[int, int, int, int]],
+        sorted_row_ys: list[int],
+        rows: dict[int, list[tuple[int, int, int, int]]],
+    ) -> int | None:
+        """
+        Find the second row (2 boxes) below the first row (4 boxes).
+
+        Args:
+            row1_y: Y position of row 1.
+            row1_boxes: Boxes in row 1.
+            sorted_row_ys: Remaining row Y positions to check.
+            rows: All rows grouped by Y position.
+
+        Returns:
+            Y position of row 2 or None if not found.
+        """
+        avg_box_height = sum(b[3] for b in row1_boxes) // len(row1_boxes)
+        max_row_distance = int(avg_box_height * ROW_DISTANCE_TOLERANCE_FACTOR)
+
+        for next_row_y in sorted_row_ys:
+            if next_row_y - row1_y > max_row_distance:
+                break
+            if len(rows[next_row_y]) == PROFILE_ROW2_BOX_COUNT:
+                return next_row_y
+
+        return None
+
+    def _calculate_profile_box_from_rows(
+        self,
+        row1_boxes: list[tuple[int, int, int, int]],
+        row2_boxes: list[tuple[int, int, int, int]],
+    ) -> tuple[tuple[int, int, int, int], list[tuple[int, int, int, int]]]:
+        """
+        Calculate profile box bounds from the detected grey box rows.
+
+        Args:
+            row1_boxes: 4 boxes from row 1 (username, icon, level, rank).
+            row2_boxes: 2 boxes from row 2 (commends, communications).
+
+        Returns:
+            Tuple of (profile_box, row1_sorted) where row1_sorted is sorted by x.
+        """
+        all_boxes = row1_boxes + row2_boxes
+        row1_sorted = sorted(row1_boxes, key=lambda b: b[0])
+
+        x_min = min(b[0] for b in all_boxes)
+        x_max = max(b[0] + b[2] for b in all_boxes)
+        y_min = min(b[1] for b in all_boxes)
+        y_max = max(b[1] + b[3] for b in all_boxes)
+
+        grey_width = x_max - x_min
+        grey_height = y_max - y_min
+
+        box_w = int(grey_width * GREY_TO_BOX_WIDTH_FACTOR)
+        box_h = int(grey_height * GREY_TO_BOX_HEIGHT_FACTOR)
+        box_x = x_min - int(box_w * GREY_TO_BOX_X_OFFSET)
+        box_y = y_min - int(box_h * GREY_TO_BOX_Y_OFFSET)
+
+        profile_box = (max(0, box_x), max(0, box_y), box_w, box_h)
+        return (profile_box, row1_sorted)
+
+    def _calculate_grey_boxes_from_black_box(
+        self,
+        box: tuple[int, int, int, int],
+    ) -> list[tuple[int, int, int, int]]:
+        """
+        Calculate grey box positions from the black profile box.
+
+        The grey boxes are at fixed ratios within the black box.
+        Returns [username, icon, level, rank] boxes.
+
+        Args:
+            box: (x, y, width, height) of the black profile box.
+
+        Returns:
+            List of 4 grey box tuples (x, y, w, h) for [username, icon, level, rank].
+        """
+        box_x, box_y, box_width, box_height = box
+
+        row1_y = box_y + int(box_height * GREY_ROW1_Y_START)
+        row1_height = int(box_height * GREY_ROW1_HEIGHT)
+
+        username = (
+            box_x + int(box_width * USERNAME_X_START),
+            row1_y,
+            int(box_width * USERNAME_WIDTH),
+            row1_height,
+        )
+
+        icon = (
+            box_x + int(box_width * ICON_X_START),
+            row1_y,
+            int(box_width * ICON_WIDTH),
+            row1_height,
+        )
+
+        level = (
+            box_x + int(box_width * LEVEL_X_START),
+            row1_y,
+            int(box_width * LEVEL_WIDTH),
+            row1_height,
+        )
+
+        rank = (
+            box_x + int(box_width * RANK_X_START),
+            row1_y,
+            int(box_width * RANK_WIDTH),
+            row1_height,
+        )
+
+        return [username, icon, level, rank]
+
+    def _calculate_regions_from_grey_boxes(
+        self,
+        image: cv2.typing.MatLike,
+        box: tuple[int, int, int, int],
+        grey_boxes: list[tuple[int, int, int, int]],
+    ) -> ImageRegions:
+        """
+        Calculate region coordinates from grey box positions.
+
+        Args:
+            image: The image.
+            box: (x, y, width, height) of the profile box.
+            grey_boxes: List of 4 grey boxes [username, icon, level, rank] sorted by x.
+
+        Returns:
+            ImageRegions with coordinates from grey box positions.
+        """
+        img_height, img_width = image.shape[:2]
+        box_x, box_y, box_width, box_height = box
+
+        # Scale factor: box_height / reference height (180 is box height at 2160p)
+        scale_factor = box_height / PROFILE_BOX_HEIGHT_4K
+
+        # Use grey box positions for username, icon, level
+        username_box = grey_boxes[0]
+        icon_box = grey_boxes[1]
+        level_box = grey_boxes[2]
+
+        # Regiment is below the profile box - calculate from box dimensions
+        regiment_x1 = box_x + int(box_width * REGIMENT_X_START)
+        regiment_x2 = min(img_width, box_x + int(box_width * REGIMENT_X_END))
+        regiment_y1 = box_y + box_height + int(box_height * REGIMENT_Y_OFFSET)
+        regiment_y2 = regiment_y1 + int(box_height * REGIMENT_HEIGHT)
+
+        # Shard region (for the other image, bottom-left)
+        shard_box_width = int(self.settings.ocr.base_box_width * scale_factor)
+        shard_box_height = int(self.settings.ocr.base_box_height * scale_factor)
+        shard_x = shard_box_height
+        shard_y = img_height - int(shard_box_height * SHARD_Y_OFFSET_MULTIPLIER)
+        shard_width = int(shard_box_width * SHARD_WIDTH_MULTIPLIER)
+
+        return ImageRegions(
+            username=Region(
+                x1=username_box[0],
+                y1=username_box[1],
+                x2=username_box[0] + username_box[2],
+                y2=username_box[1] + username_box[3],
+            ),
+            icon=Region(
+                x1=icon_box[0],
+                y1=icon_box[1],
+                x2=icon_box[0] + icon_box[2],
+                y2=icon_box[1] + icon_box[3],
+            ),
+            level=Region(
+                x1=level_box[0],
+                y1=level_box[1],
+                x2=level_box[0] + level_box[2],
+                y2=level_box[1] + level_box[3],
+            ),
+            regiment=Region(x1=regiment_x1, y1=regiment_y1, x2=regiment_x2, y2=regiment_y2),
+            shard=Region(
+                x1=shard_x,
+                y1=shard_y,
+                x2=shard_x + shard_width,
+                y2=shard_y + shard_box_height,
+            ),
+            scale_factor=scale_factor,
+        )
+
+    def _detect_faction_with_scaled_template(
+        self,
+        image: cv2.typing.MatLike,
+        icon_region: Region,
+        threshold: float,
+    ) -> Faction | None:
+        """
+        Detect faction by matching scaled master icons against the icon region.
+
+        Args:
+            image: The full image.
+            icon_region: The region where the icon should be.
+            threshold: Minimum match confidence to accept.
+
+        Returns:
+            Detected Faction or None if no match.
+        """
+        # Extract icon region from image
+        icon_img = image[icon_region.y1 : icon_region.y2, icon_region.x1 : icon_region.x2]
+        if icon_img.size == 0:
+            return None
+
+        # Icon is square, sized to fit the region (use smaller dimension)
+        region_h = icon_region.y2 - icon_region.y1
+        region_w = icon_region.x2 - icon_region.x1
+        icon_size = min(region_h, region_w)
+
+        best_faction = None
+        best_score = threshold
+
+        for template, faction in [
+            (self.colonial_icon, Faction.COLONIAL),
+            (self.warden_icon, Faction.WARDEN),
+        ]:
+            if template is None:
+                continue
+
+            # Scale master icon to fit region
+            scaled_template = cv2.resize(
+                src=template,
+                dsize=(icon_size, icon_size),
+                interpolation=cv2.INTER_CUBIC,
+            )
+
+            # Template must fit in the icon region
+            if (
+                scaled_template.shape[0] > icon_img.shape[0]
+                or scaled_template.shape[1] > icon_img.shape[1]
+            ):
+                continue
+
+            result = cv2.matchTemplate(
+                image=icon_img,
+                templ=scaled_template,
+                method=cv2.TM_CCOEFF_NORMED,
+            )
+
+            _, max_val, _, _ = cv2.minMaxLoc(result)
+
+            if max_val > best_score:
+                best_score = max_val
+                best_faction = faction
+
+        return best_faction
+
+    def _find_shard_dynamic(
+        self,
+        image: cv2.typing.MatLike,
+    ) -> tuple[str | None, str | None]:
+        """
+        Find shard and time dynamically by searching for the time pattern.
+
+        The shard name is always on the line immediately after the time.
+        Time format: digits + comma + 4 digits (e.g., "Day 154, 2335 Hours").
+
+        Args:
+            image: Shard/map image to extract from.
+
+        Returns:
+            Tuple of (shard, ingame_time) or (None, None) if not found.
+        """
+        # OCR the entire image
+        text = pytesseract.image_to_string(image, lang=self.settings.ocr.language)
+
+        lines = [line.strip() for line in text.split("\n") if line.strip()]
+
+        found_time: str | None = None
+        found_shard: str | None = None
+
+        # Find the line with time pattern, shard is the next line
+        for i, line in enumerate(lines):
+            # Look for pattern: digits + comma + 4 digits (e.g., "154, 2335" or "Day 154, 2335")
+            if re.search(r"\d{1,4}\s*,\s*\d{4}", line):
+                found_time = extract_day_and_hour(line)
+                if found_time and "," in found_time and ":" in found_time:
+                    # Shard is on the next line
+                    if i + 1 < len(lines):
+                        found_shard = lines[i + 1].upper().strip()
+                    break
+
+        return found_shard, found_time
+
+    def _detect_faction(
+        self,
+        image: cv2.typing.MatLike,
+        threshold: float,
+    ) -> Faction | None:
         """
         Detect faction from the icon region using template matching.
 
@@ -320,97 +874,28 @@ class VerificationService:
 
         Args:
             image (cv2.typing.MatLike): Icon region image.
+            threshold: Minimum match confidence to accept.
 
         Returns:
             Faction | None: Detected faction, or None if no match above threshold.
         """
-        threshold = 0.7
         colonial_score = 0.0
         wardens_score = 0.0
 
         if self.colonial_icon is not None:
-            colonial_score = self._match_template(image, self.colonial_icon, threshold)
+            colonial_score = self._match_template(image=image, template=self.colonial_icon)
 
-        if self.wardens_icon is not None:
-            wardens_score = self._match_template(image, self.wardens_icon, threshold)
+        if self.warden_icon is not None:
+            wardens_score = self._match_template(image=image, template=self.warden_icon)
 
         # Return the faction with the highest score above threshold
         if colonial_score >= threshold and colonial_score >= wardens_score:
             return Faction.COLONIAL
         if wardens_score >= threshold and wardens_score > colonial_score:
-            return Faction.WARDENS
+            return Faction.WARDEN
 
         # No faction detected above threshold
         return None
-
-    def _calculate_regions(
-        self,
-        image: cv2.typing.MatLike,
-    ) -> ImageRegions:
-        """
-        Calculate region coordinates based on image dimensions.
-
-        Uses foxhole_stockpiles scaling logic with 4K (2160p) as base resolution.
-
-        Args:
-            image (cv2.typing.MatLike): Image to calculate regions for.
-
-        Returns:
-            ImageRegions: Calculated region coordinates.
-        """
-        height, width = image.shape[:2]
-        scale_factor = height / self.settings.ocr.base_height
-
-        box_width = int(self.settings.ocr.base_box_width * scale_factor)
-        box_height = int(self.settings.ocr.base_box_height * scale_factor)
-
-        # Profile regions (using proportional coordinates)
-        py = height / 5
-        px = width / 5
-
-        # Shard region (bottom-left corner, same logic as foxhole_stockpiles)
-        shard_x = box_height
-        shard_y = height - int(self.settings.ocr.base_box_height * scale_factor * 3)
-        shard_width = int(box_width * 3.5)
-        shard_height = box_height
-
-        # Common y coordinates for username/icon/level row
-        row_y1 = int(0.62 * py)
-        row_y2 = int(0.775 * py)
-
-        return ImageRegions(
-            username=Region(
-                y1=row_y1,
-                y2=row_y2,
-                x1=int(1.81 * px),
-                x2=int(2.25 * px),
-            ),
-            icon=Region(
-                y1=row_y1,
-                y2=row_y2,
-                x1=int(2.34 * px),
-                x2=int(2.49 * px),
-            ),
-            level=Region(
-                y1=row_y1,
-                y2=row_y2,
-                x1=int(2.51 * px),
-                x2=int(2.83 * px),
-            ),
-            regiment=Region(
-                y1=int(1.22 * py),
-                y2=int(1.34 * py),
-                x1=int(2.42 * px),
-                x2=int(3.5 * px),
-            ),
-            shard=Region(
-                y1=shard_y,
-                y2=shard_y + shard_height,
-                x1=shard_x,
-                x2=shard_x + shard_width,
-            ),
-            scale_factor=scale_factor,
-        )
 
     def _save_debug_image(
         self,
@@ -561,10 +1046,14 @@ class VerificationService:
         """
         data = Verification()
 
+        # Enable scaling for lower resolution images (below 4K)
+        # This improves OCR accuracy for smaller text
+        use_scale = regions.scale_factor < SCALE_UPSCALE_THRESHOLD
+
         # Extract username from dedicated region
         r = regions.username
         username_image = image[r.y1 : r.y2, r.x1 : r.x2]
-        username_text = self._extract_text_from_image(username_image)
+        username_text = self._extract_text_from_image(username_image, scale=use_scale)
         data.name = username_text.strip() if username_text.strip() else None
 
         # No name found - either image is too small or this is a map image
@@ -574,7 +1063,7 @@ class VerificationService:
         # Extract level from dedicated region (language-agnostic: look for : and digits)
         r = regions.level
         level_image = image[r.y1 : r.y2, r.x1 : r.x2]
-        level_text = self._extract_text_from_image(level_image)
+        level_text = self._extract_text_from_image(level_image, scale=use_scale)
         # Look for colon and extract digits after it
         if ":" in level_text:
             level_part = level_text.split(":")[-1]
@@ -582,15 +1071,13 @@ class VerificationService:
             if digits:
                 data.level = int(digits)
 
-        # Detect faction from icon region
-        r = regions.icon
-        icon_image = image[r.y1 : r.y2, r.x1 : r.x2]
-        data.faction = self._detect_faction(icon_image)
+        # Note: Faction is detected separately using scaled template matching
+        # in _detect_faction_with_scaled_template() and set by the caller
 
         # Extract Regiment name from grey bar region
         r = regions.regiment
         regiment_image = image[r.y1 : r.y2, r.x1 : r.x2]
-        regiment_text = self._extract_text_from_image(regiment_image, scale=False)
+        regiment_text = self._extract_text_from_image(regiment_image, scale=use_scale)
         data.regiment = self._parse_regiment_name(regiment_text)
 
         return data
@@ -699,13 +1186,180 @@ class VerificationService:
 
         return shard, ingame_time
 
+    def _decode_and_validate_images(
+        self,
+        image1_bytes: bytes,
+        image2_bytes: bytes,
+    ) -> tuple[MatLike, MatLike]:
+        """
+        Decode image bytes and validate minimum dimensions.
+
+        Args:
+            image1_bytes: First image bytes.
+            image2_bytes: Second image bytes.
+
+        Returns:
+            Tuple of decoded images (img1, img2).
+
+        Raises:
+            ValueError: If images cannot be decoded or are too small.
+        """
+        images: list[MatLike | None] = []
+        for img_bytes in [image1_bytes, image2_bytes]:
+            nparr = np.frombuffer(buffer=img_bytes, dtype=np.uint8)
+            img = cv2.imdecode(buf=nparr, flags=cv2.IMREAD_COLOR)
+            images.append(img)
+
+        if images[0] is None or images[1] is None:
+            raise ValueError("Failed to decode one or both images")
+
+        img1: MatLike = images[0]
+        img2: MatLike = images[1]
+
+        for i, img in enumerate([img1, img2]):
+            if img.shape[0] < 100 or img.shape[1] < 100:
+                raise ValueError(f"Image {i + 1} is too small (minimum 100x100 pixels)")
+
+        return img1, img2
+
+    def _determine_profile_and_shard_images(
+        self,
+        img1: MatLike,
+        img2: MatLike,
+    ) -> tuple[MatLike, MatLike, tuple[int, int, int, int], list[tuple[int, int, int, int]]]:
+        """
+        Determine which image is profile and which is shard based on profile box detection.
+
+        Args:
+            img1: First decoded image.
+            img2: Second decoded image.
+
+        Returns:
+            Tuple of (profile_img, shard_img, profile_box, grey_boxes).
+
+        Raises:
+            ValueError: If both or neither images have profile boxes.
+        """
+        result1 = self._find_profile_box(img1)
+        result2 = self._find_profile_box(img2)
+
+        logger.debug(
+            f"Profile box detection: img1={'found' if result1 else 'not found'}, "
+            f"img2={'found' if result2 else 'not found'}"
+        )
+
+        if result1 is not None and result2 is None:
+            profile_box, grey_boxes = result1
+            return img1, img2, profile_box, grey_boxes
+        elif result2 is not None and result1 is None:
+            profile_box, grey_boxes = result2
+            return img2, img1, profile_box, grey_boxes
+        elif result1 is not None and result2 is not None:
+            raise ValueError(
+                "Both images appear to be profile images (both have profile box). "
+                "Expected one profile image and one shard/map image."
+            )
+        else:
+            raise ValueError(
+                "Could not identify profile image - no profile box detected in either image. "
+                "Expected one image with the player profile UI."
+            )
+
+    def _extract_profile_data(
+        self,
+        profile_img: MatLike,
+        profile_box: tuple[int, int, int, int],
+        grey_boxes: list[tuple[int, int, int, int]] | None,
+    ) -> tuple[Verification, ImageRegions]:
+        """
+        Extract verification data from the profile image.
+
+        Args:
+            profile_img: The profile image.
+            profile_box: The detected profile box coordinates.
+            grey_boxes: List of grey boxes or None to calculate from black box.
+
+        Returns:
+            Tuple of (verification data, profile regions).
+
+        Raises:
+            ValueError: If no player name found.
+        """
+        if grey_boxes is None:
+            grey_boxes = self._calculate_grey_boxes_from_black_box(box=profile_box)
+
+        profile_regions = self._calculate_regions_from_grey_boxes(
+            image=profile_img,
+            box=profile_box,
+            grey_boxes=grey_boxes,
+        )
+
+        faction = self._detect_faction_with_scaled_template(
+            image=profile_img,
+            icon_region=profile_regions.icon,
+            threshold=FACTION_MATCH_THRESHOLD,
+        )
+
+        if self.settings.ocr.debug_mode:
+            self._save_debug_image(
+                image=profile_img,
+                regions=profile_regions,
+                filename="debug_profile_regions.png",
+            )
+
+        verification = self._find_user_info(image=profile_img, regions=profile_regions)
+        verification.faction = faction
+
+        if verification.name is None:
+            raise ValueError("No player name found in the profile image")
+
+        return verification, profile_regions
+
+    def _extract_shard_data(
+        self,
+        shard_img: MatLike,
+        verification: Verification,
+    ) -> Verification:
+        """
+        Extract shard and war data and add to verification.
+
+        Args:
+            shard_img: The shard/map image.
+            verification: Verification object to update.
+
+        Returns:
+            Updated verification with shard and war data.
+
+        Raises:
+            ValueError: If no shard information found.
+        """
+        shard, ingame_time = self._find_shard_dynamic(shard_img)
+
+        if shard is None:
+            raise ValueError("No shard information found in the map/shard image")
+
+        verification.shard = shard
+        verification.ingame_time = ingame_time
+
+        war_service = get_war_service()
+        verification.war_number = war_service.state.war_number
+
+        current_time = get_current_ingame_time()
+        if current_time is not None:
+            current_day, current_hour, current_minute = current_time
+            verification.current_ingame_time = (
+                f"{current_day}, {current_hour:02d}:{current_minute:02d}"
+            )
+
+        return verification
+
     def verify(self, image1_bytes: bytes, image2_bytes: bytes) -> Verification:
         """
         Process two images and extract user verification information.
 
         Args:
-            image1_bytes (bytes): First image bytes.
-            image2_bytes (bytes): Second image bytes.
+            image1_bytes: First image bytes.
+            image2_bytes: Second image bytes.
 
         Returns:
             Verification: Extracted verification data.
@@ -715,114 +1369,32 @@ class VerificationService:
             RuntimeError: If image processing fails.
         """
         logger.info("Processing image pair for verification")
-
         start_time = time.perf_counter()
 
         try:
-            # Decode images
             decode_start = time.perf_counter()
-            images: list[MatLike | None] = []
-            for img_bytes in [image1_bytes, image2_bytes]:
-                nparr = np.frombuffer(buffer=img_bytes, dtype=np.uint8)
-                img = cv2.imdecode(buf=nparr, flags=cv2.IMREAD_COLOR)
-                images.append(img)
-
-            # Check if images were decoded successfully
-            if images[0] is None or images[1] is None:
-                raise ValueError("Failed to decode one or both images")
-
-            # Extract decoded images (now guaranteed to be non-None)
-            img1: MatLike = images[0]
-            img2: MatLike = images[1]
+            img1, img2 = self._decode_and_validate_images(
+                image1_bytes=image1_bytes,
+                image2_bytes=image2_bytes,
+            )
             decode_time = time.perf_counter() - decode_start
 
-            # Validate minimum image dimensions
-            for i, img in enumerate([img1, img2]):
-                if img.shape[0] < 100 or img.shape[1] < 100:
-                    raise ValueError(f"Image {i + 1} is too small (minimum 100x100 pixels)")
-
-            # Calculate regions for both images
-            regions1 = self._calculate_regions(img1)
-            regions2 = self._calculate_regions(img2)
-
-            # Save debug images if debug mode is enabled
-            if self.settings.ocr.debug_mode:
-                self._save_debug_image(
-                    image=img1,
-                    regions=regions1,
-                    filename="debug_image1_regions.png",
-                )
-                self._save_debug_image(
-                    image=img2,
-                    regions=regions2,
-                    filename="debug_image2_regions.png",
-                )
-
-            # First, detect faction in both images to identify the profile image
             ocr_start = time.perf_counter()
+            profile_img, shard_img, profile_box, grey_boxes = (
+                self._determine_profile_and_shard_images(img1=img1, img2=img2)
+            )
 
-            r1 = regions1.icon
-            icon1 = img1[r1.y1 : r1.y2, r1.x1 : r1.x2]
-            faction1 = self._detect_faction(icon1)
+            verification, _ = self._extract_profile_data(
+                profile_img=profile_img,
+                profile_box=profile_box,
+                grey_boxes=grey_boxes,
+            )
 
-            r2 = regions2.icon
-            icon2 = img2[r2.y1 : r2.y2, r2.x1 : r2.x2]
-            faction2 = self._detect_faction(icon2)
-
-            # Determine which image is the profile (has faction icon)
-            has_faction1 = faction1 is not None
-            has_faction2 = faction2 is not None
-
-            if not has_faction1 and not has_faction2:
-                raise ValueError(
-                    "Could not detect faction icon in either image - "
-                    "need one profile image with colonial or wardens icon"
-                )
-            if has_faction1 and has_faction2:
-                raise ValueError(
-                    "Both images contain faction icons - "
-                    "need one profile image and one map/shard image"
-                )
-
-            # Extract data from the correct images
-            if has_faction1:
-                profile_img, profile_regions = img1, regions1
-                shard_img, shard_regions = img2, regions2
-                faction = faction1
-            else:
-                profile_img, profile_regions = img2, regions2
-                shard_img, shard_regions = img1, regions1
-                faction = faction2
-
-            # Extract user info from profile image
-            verification = self._find_user_info(image=profile_img, regions=profile_regions)
-            verification.faction = faction
-
-            # Validate name was found in profile image
-            if verification.name is None:
-                raise ValueError("No player name found in the profile image")
-
-            # Extract shard info from shard image
-            shard, ingame_time = self._get_shard_and_time(image=shard_img, regions=shard_regions)
+            verification = self._extract_shard_data(
+                shard_img=shard_img,
+                verification=verification,
+            )
             ocr_time = time.perf_counter() - ocr_start
-
-            if shard is None:
-                raise ValueError("No shard information found in the map/shard image")
-
-            verification.shard = shard
-            verification.ingame_time = ingame_time
-
-            # Add war state info
-            war_service = get_war_service()
-            verification.war_number = war_service.state.war_number
-
-            # Add current in-game time
-            current_time = get_current_ingame_time()
-            if current_time is not None:
-                current_day, current_hour, current_minute = current_time
-                verification.current_ingame_time = (
-                    f"{current_day}, {current_hour:02d}:{current_minute:02d}"
-                )
 
             total_time = time.perf_counter() - start_time
             logger.info(
@@ -841,5 +1413,12 @@ class VerificationService:
         except ValueError:
             raise
         except Exception as e:
-            logger.exception(f"Unexpected error during verification: {e}")
+            logger.exception(
+                "Unexpected error during verification",
+                extra={
+                    "image1_size": len(image1_bytes),
+                    "image2_size": len(image2_bytes),
+                    "error_type": type(e).__name__,
+                },
+            )
             raise RuntimeError("Internal processing error") from e

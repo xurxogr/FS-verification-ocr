@@ -41,9 +41,9 @@ class OCRSettings(BaseModel):
         default="data/colonial_icon.png",
         description="Path to colonial faction icon for template matching",
     )
-    wardens_icon_path: str | None = Field(
-        default="data/wardens_icon.png",
-        description="Path to wardens faction icon for template matching",
+    warden_icon_path: str | None = Field(
+        default="data/warden_icon.png",
+        description="Path to warden faction icon for template matching",
     )
     scale_factor: int = Field(
         default=4, ge=1, le=10, description="Scale factor for small text extraction"
@@ -75,7 +75,7 @@ class OCRSettings(BaseModel):
             raise ValueError(f"Tesseract binary not executable: {v}")
         return v
 
-    @field_validator("colonial_icon_path", "wardens_icon_path")
+    @field_validator("colonial_icon_path", "warden_icon_path")
     @classmethod
     def validate_icon_path(cls, v: str | None) -> str | None:
         """Validate faction icon path exists."""

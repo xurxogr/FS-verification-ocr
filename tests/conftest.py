@@ -39,7 +39,7 @@ def mock_settings() -> AppSettings:
             tesseract_cmd=None,
             language="eng",
             colonial_icon_path=None,
-            wardens_icon_path=None,
+            warden_icon_path=None,
             debug_mode=False,
         ),
         logging=LoggingSettings(
@@ -115,7 +115,7 @@ def integration_settings() -> AppSettings:
             tesseract_cmd=None,
             language="eng",
             colonial_icon_path="data/colonial_icon.png",
-            wardens_icon_path="data/wardens_icon.png",
+            warden_icon_path="data/warden_icon.png",
             debug_mode=False,
         ),
         logging=LoggingSettings(

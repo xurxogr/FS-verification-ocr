@@ -31,7 +31,7 @@ class TestVerification:
             name="TestPlayer",
             level=25,
             regiment="[TAG] Test Regiment",
-            faction=Faction.WARDENS,
+            faction=Faction.WARDEN,
             shard="ABLE",
             war_number=132,
             current_ingame_time="268, 14:30",
@@ -39,7 +39,7 @@ class TestVerification:
         assert verification.name == "TestPlayer"
         assert verification.level == 25
         assert verification.regiment == "[TAG] Test Regiment"
-        assert verification.faction == Faction.WARDENS
+        assert verification.faction == Faction.WARDEN
         assert verification.shard == "ABLE"
         assert verification.war_number == 132
         assert verification.current_ingame_time == "268, 14:30"

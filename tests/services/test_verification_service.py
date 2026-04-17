@@ -3,7 +3,7 @@
 import os
 import pathlib
 import time
-from typing import Any
+from typing import Any, TypeAlias
 from unittest.mock import patch
 
 import cv2
@@ -22,6 +22,55 @@ from verification_ocr.services.verification_service import (
     get_current_ingame_time,
     parse_ingame_time,
 )
+
+# Type alias for profile box result: (box, grey_boxes)
+ProfileBoxResult: TypeAlias = tuple[tuple[int, int, int, int], list[tuple[int, int, int, int]]]
+
+
+def create_mock_profile_box() -> ProfileBoxResult:
+    """
+    Create a mock profile box result for testing.
+
+    Returns a tuple of (box, grey_boxes) that can be returned by _find_profile_box.
+    """
+    box = (100, 100, 500, 90)
+    grey_boxes = [
+        (100, 110, 150, 30),  # username
+        (260, 110, 50, 30),  # icon
+        (320, 110, 100, 30),  # level
+        (430, 110, 100, 30),  # rank
+    ]
+    return (box, grey_boxes)
+
+
+def create_test_regions(
+    service: VerificationService,
+    img: np.ndarray,
+) -> ImageRegions:
+    """
+    Create ImageRegions for testing using the new unified API.
+
+    Creates a profile box based on image dimensions (at 2160p ratio),
+    calculates grey boxes, and returns regions.
+
+    Args:
+        service: VerificationService instance.
+        img: Image array.
+
+    Returns:
+        ImageRegions for the given image.
+    """
+    height, width = img.shape[:2]
+    # Create a profile box scaled to image height (180px at 2160p)
+    scale = height / 2160
+    box_h = int(180 * scale)
+    box_w = int(1096 * scale)
+    box_x = int(width * 0.36)  # Approximate position
+    box_y = int(height * 0.12)
+    box = (box_x, box_y, box_w, box_h)
+
+    grey_boxes = service._calculate_grey_boxes_from_black_box(box)
+    return service._calculate_regions_from_grey_boxes(img, box, grey_boxes)
 
 
 class TestParseRegimentName:
@@ -367,7 +416,7 @@ class TestVerificationServiceInit:
 
         """
         mock_settings.ocr.colonial_icon_path = "/path/to/colonial_icon.png"
-        mock_settings.ocr.wardens_icon_path = None
+        mock_settings.ocr.warden_icon_path = None
         mock_icon = np.ones((50, 50, 3), dtype=np.uint8)
 
         with patch(
@@ -375,22 +424,25 @@ class TestVerificationServiceInit:
             return_value=mock_icon,
         ) as mock_imread:
             service = VerificationService(mock_settings)
-            mock_imread.assert_called_once_with("/path/to/colonial_icon.png", cv2.IMREAD_COLOR)
+            mock_imread.assert_called_once_with(
+                filename="/path/to/colonial_icon.png",
+                flags=cv2.IMREAD_COLOR,
+            )
             assert service.colonial_icon is not None
 
-    def test_init_loads_wardens_icon_when_path_provided(
+    def test_init_loads_warden_icon_when_path_provided(
         self,
         mock_settings: AppSettings,
     ) -> None:
         """
-        Test that wardens icon is loaded when path is provided.
+        Test that warden icon is loaded when path is provided.
 
         Args:
             mock_settings (AppSettings): Mock settings fixture.
 
         """
         mock_settings.ocr.colonial_icon_path = None
-        mock_settings.ocr.wardens_icon_path = "/path/to/wardens_icon.png"
+        mock_settings.ocr.warden_icon_path = "/path/to/warden_icon.png"
         mock_icon = np.ones((50, 50, 3), dtype=np.uint8)
 
         with patch(
@@ -398,8 +450,11 @@ class TestVerificationServiceInit:
             return_value=mock_icon,
         ) as mock_imread:
             service = VerificationService(mock_settings)
-            mock_imread.assert_called_once_with("/path/to/wardens_icon.png", cv2.IMREAD_COLOR)
-            assert service.wardens_icon is not None
+            mock_imread.assert_called_once_with(
+                filename="/path/to/warden_icon.png",
+                flags=cv2.IMREAD_COLOR,
+            )
+            assert service.warden_icon is not None
 
     def test_init_logs_warning_when_colonial_icon_file_not_found(
         self,
@@ -413,7 +468,7 @@ class TestVerificationServiceInit:
 
         """
         mock_settings.ocr.colonial_icon_path = "/nonexistent/colonial.png"
-        mock_settings.ocr.wardens_icon_path = None
+        mock_settings.ocr.warden_icon_path = None
 
         with patch(
             "verification_ocr.services.verification_service.cv2.imread",
@@ -427,19 +482,19 @@ class TestVerificationServiceInit:
                 assert "Failed to load colonial icon" in mock_warning.call_args[0][0]
                 assert service.colonial_icon is None
 
-    def test_init_logs_warning_when_wardens_icon_file_not_found(
+    def test_init_logs_warning_when_warden_icon_file_not_found(
         self,
         mock_settings: AppSettings,
     ) -> None:
         """
-        Test that a warning is logged when wardens icon file is not found.
+        Test that a warning is logged when warden icon file is not found.
 
         Args:
             mock_settings (AppSettings): Mock settings fixture.
 
         """
         mock_settings.ocr.colonial_icon_path = None
-        mock_settings.ocr.wardens_icon_path = "/nonexistent/wardens.png"
+        mock_settings.ocr.warden_icon_path = "/nonexistent/warden.png"
 
         with patch(
             "verification_ocr.services.verification_service.cv2.imread",
@@ -450,8 +505,8 @@ class TestVerificationServiceInit:
             ) as mock_warning:
                 service = VerificationService(mock_settings)
                 mock_warning.assert_called_once()
-                assert "Failed to load wardens icon" in mock_warning.call_args[0][0]
-                assert service.wardens_icon is None
+                assert "Failed to load warden icon" in mock_warning.call_args[0][0]
+                assert service.warden_icon is None
 
     def test_init_colonial_icon_none_when_no_path(
         self,
@@ -618,7 +673,7 @@ class TestVerificationServiceDetectFaction:
         assert img is not None
 
         service = VerificationService(mock_settings)
-        result = service._detect_faction(img)
+        result = service._detect_faction(image=img, threshold=0.7)
         assert result is None
 
     def test_detect_faction_returns_colonial_when_colonial_matches(
@@ -642,7 +697,7 @@ class TestVerificationServiceDetectFaction:
         # Set a mock colonial icon that will match
         service.colonial_icon = img.copy()
 
-        result = service._detect_faction(img)
+        result = service._detect_faction(image=img, threshold=0.7)
         assert result == Faction.COLONIAL
 
     def test_detect_faction_returns_wardens_when_wardens_matches(
@@ -651,7 +706,7 @@ class TestVerificationServiceDetectFaction:
         sample_image_bytes: bytes,
     ) -> None:
         """
-        Test that WARDENS is returned when wardens icon matches above threshold.
+        Test that WARDEN is returned when warden icon matches above threshold.
 
         Args:
             mock_settings (AppSettings): Mock settings fixture.
@@ -664,10 +719,10 @@ class TestVerificationServiceDetectFaction:
 
         service = VerificationService(mock_settings)
         # Set a mock wardens icon that will match
-        service.wardens_icon = img.copy()
+        service.warden_icon = img.copy()
 
-        result = service._detect_faction(img)
-        assert result == Faction.WARDENS
+        result = service._detect_faction(image=img, threshold=0.7)
+        assert result == Faction.WARDEN
 
     def test_find_user_info_sets_faction_colonial(
         self,
@@ -682,13 +737,13 @@ class TestVerificationServiceDetectFaction:
         """
         img = np.ones((2160, 3840, 3), dtype=np.uint8) * 255
         service = VerificationService(mock_settings)
-        regions = service._calculate_regions(img)
+        regions = create_test_regions(service, img)
 
         with patch.object(service, "_extract_text_from_image", return_value="TestPlayer"):
-            with patch.object(service, "_detect_faction", return_value=Faction.COLONIAL):
-                result = service._find_user_info(img, regions)
-
-                assert result.faction == Faction.COLONIAL
+            result = service._find_user_info(img, regions)
+            # Faction is set separately by verify(), not by _find_user_info
+            assert result.name == "TestPlayer"
+            assert result.faction is None
 
 
 class TestVerificationServiceCalculateRegions:
@@ -706,7 +761,7 @@ class TestVerificationServiceCalculateRegions:
         """
         img = np.ones((2160, 3840, 3), dtype=np.uint8) * 255
         service = VerificationService(mock_settings)
-        regions = service._calculate_regions(img)
+        regions = create_test_regions(service, img)
 
         assert regions.username is not None
         assert regions.icon is not None
@@ -727,7 +782,7 @@ class TestVerificationServiceCalculateRegions:
         """
         img = np.ones((2160, 3840, 3), dtype=np.uint8) * 255
         service = VerificationService(mock_settings)
-        regions = service._calculate_regions(img)
+        regions = create_test_regions(service, img)
 
         assert regions.scale_factor == 1.0
 
@@ -743,7 +798,7 @@ class TestVerificationServiceCalculateRegions:
         """
         img = np.ones((1080, 1920, 3), dtype=np.uint8) * 255
         service = VerificationService(mock_settings)
-        regions = service._calculate_regions(img)
+        regions = create_test_regions(service, img)
 
         assert regions.scale_factor == 0.5
 
@@ -769,7 +824,7 @@ class TestVerificationServiceSaveDebugImage:
 
         img = np.ones((500, 500, 3), dtype=np.uint8) * 255
         service = VerificationService(mock_settings)
-        regions = service._calculate_regions(img)
+        regions = create_test_regions(service, img)
 
         service._save_debug_image(
             image=img,
@@ -797,7 +852,7 @@ class TestVerificationServiceSaveDebugImage:
 
         img = np.ones((500, 500, 3), dtype=np.uint8) * 255
         service = VerificationService(mock_settings)
-        regions = service._calculate_regions(img)
+        regions = create_test_regions(service, img)
 
         # Filename with special characters should be rejected
         service._save_debug_image(
@@ -827,7 +882,7 @@ class TestVerificationServiceSaveDebugImage:
 
         img = np.ones((500, 500, 3), dtype=np.uint8) * 255
         service = VerificationService(mock_settings)
-        regions = service._calculate_regions(img)
+        regions = create_test_regions(service, img)
 
         # Path traversal attempt - basename strips path, file saved safely in debug dir
         service._save_debug_image(
@@ -867,7 +922,7 @@ class TestVerificationServiceSaveDebugImage:
 
         img = np.ones((500, 500, 3), dtype=np.uint8) * 255
         service = VerificationService(mock_settings)
-        regions = service._calculate_regions(img)
+        regions = create_test_regions(service, img)
 
         # Mock os.path.realpath to simulate a symlink resolving outside
         with patch("os.path.realpath") as mock_realpath:
@@ -986,7 +1041,7 @@ class TestVerificationServiceGetShardAndTime:
         """
         img = np.ones((2160, 3840, 3), dtype=np.uint8) * 255
         service = VerificationService(mock_settings)
-        regions = service._calculate_regions(img)
+        regions = create_test_regions(service, img)
 
         with patch(
             "verification_ocr.services.verification_service.pytesseract.image_to_string",
@@ -1009,7 +1064,7 @@ class TestVerificationServiceGetShardAndTime:
         """
         img = np.ones((2160, 3840, 3), dtype=np.uint8) * 255
         service = VerificationService(mock_settings)
-        regions = service._calculate_regions(img)
+        regions = create_test_regions(service, img)
 
         with patch(
             "verification_ocr.services.verification_service.pytesseract.image_to_string",
@@ -1032,7 +1087,7 @@ class TestVerificationServiceGetShardAndTime:
         """
         img = np.ones((2160, 3840, 3), dtype=np.uint8) * 255
         service = VerificationService(mock_settings)
-        regions = service._calculate_regions(img)
+        regions = create_test_regions(service, img)
 
         with patch(
             "verification_ocr.services.verification_service.pytesseract.image_to_string",
@@ -1063,12 +1118,12 @@ class TestVerificationServiceVerify:
         with pytest.raises(ValueError, match="Failed to decode"):
             service.verify(invalid_image_bytes, invalid_image_bytes)
 
-    def test_verify_raises_error_when_no_faction_found(
+    def test_verify_raises_error_when_no_profile_box_found(
         self,
         mock_settings: AppSettings,
     ) -> None:
         """
-        Test that ValueError is raised when no faction icon is found in either image.
+        Test that ValueError is raised when no profile box is found in either image.
 
         Args:
             mock_settings (AppSettings): Mock settings fixture.
@@ -1079,16 +1134,16 @@ class TestVerificationServiceVerify:
         image_bytes = buffer.tobytes()
 
         service = VerificationService(mock_settings)
-        # No faction icons loaded, so detection will return None
-        with pytest.raises(ValueError, match="Could not detect faction icon in either image"):
+        # No profile box will be detected in plain images
+        with pytest.raises(ValueError, match="Could not identify profile image"):
             service.verify(image_bytes, image_bytes)
 
-    def test_verify_raises_error_when_both_images_have_faction(
+    def test_verify_raises_error_when_both_images_have_profile_box(
         self,
         mock_settings: AppSettings,
     ) -> None:
         """
-        Test that ValueError is raised when both images contain faction icons.
+        Test that ValueError is raised when both images appear to be profile images.
 
         Args:
             mock_settings (AppSettings): Mock settings fixture.
@@ -1103,9 +1158,13 @@ class TestVerificationServiceVerify:
         image2_bytes = buffer2.tobytes()
 
         service = VerificationService(mock_settings)
-        # Mock faction detection to return faction for both images
-        with patch.object(service, "_detect_faction", return_value=Faction.COLONIAL):
-            with pytest.raises(ValueError, match="Both images contain faction icons"):
+        # Mock profile box detection to return a box for both images
+        mock_box = (
+            (100, 100, 500, 90),
+            [(100, 110, 150, 30), (260, 110, 50, 30), (320, 110, 100, 30), (430, 110, 100, 30)],
+        )
+        with patch.object(service, "_find_profile_box", return_value=mock_box):
+            with pytest.raises(ValueError, match="Both images appear to be profile images"):
                 service.verify(image1_bytes, image2_bytes)
 
     def test_verify_raises_error_when_no_name_in_profile(
@@ -1133,14 +1192,18 @@ class TestVerificationServiceVerify:
             return_value="",
         ):
             service = VerificationService(mock_settings)
-            # Mock: first image has faction (profile), second doesn't (shard)
-            faction_call_count = [0]
+            # Mock: first image has profile box, second doesn't (shard)
+            mock_box = (
+                (100, 100, 500, 90),
+                [(100, 110, 150, 30), (260, 110, 50, 30), (320, 110, 100, 30), (430, 110, 100, 30)],
+            )
+            call_count = [0]
 
-            def mock_faction(img: Any) -> Faction | None:
-                faction_call_count[0] += 1
-                return Faction.COLONIAL if faction_call_count[0] == 1 else None
+            def mock_find_profile_box(img: Any) -> ProfileBoxResult | None:
+                call_count[0] += 1
+                return mock_box if call_count[0] == 1 else None
 
-            with patch.object(service, "_detect_faction", side_effect=mock_faction):
+            with patch.object(service, "_find_profile_box", side_effect=mock_find_profile_box):
                 with pytest.raises(ValueError, match="No player name found in the profile image"):
                     service.verify(profile_bytes, shard_bytes)
 
@@ -1183,19 +1246,23 @@ class TestVerificationServiceVerify:
             side_effect=mock_ocr,
         ):
             service = VerificationService(mock_settings)
-            # Mock: first image has faction (profile), second doesn't (shard)
-            faction_call_count = [0]
+            # Mock: first image has profile box, second doesn't (shard)
+            mock_box = create_mock_profile_box()
+            profile_box_call_count = [0]
 
-            def mock_faction(img: Any) -> Faction | None:
-                faction_call_count[0] += 1
-                return Faction.COLONIAL if faction_call_count[0] == 1 else None
+            def mock_find_profile_box(img: Any) -> ProfileBoxResult | None:
+                profile_box_call_count[0] += 1
+                return mock_box if profile_box_call_count[0] == 1 else None
 
-            with patch.object(service, "_detect_faction", side_effect=mock_faction):
-                result = service.verify(profile_bytes, shard_bytes)
+            with patch.object(service, "_find_profile_box", side_effect=mock_find_profile_box):
+                with patch.object(
+                    service, "_detect_faction_with_scaled_template", return_value=Faction.COLONIAL
+                ):
+                    result = service.verify(profile_bytes, shard_bytes)
 
-                assert result.name == "TestPlayer"
-                assert result.level == 25
-                assert result.faction == Faction.COLONIAL
+                    assert result.name == "TestPlayer"
+                    assert result.level == 25
+                    assert result.faction == Faction.COLONIAL
 
     def test_verify_handles_malformed_ocr_text(
         self,
@@ -1235,13 +1302,14 @@ class TestVerificationServiceVerify:
             side_effect=mock_ocr,
         ):
             service = VerificationService(mock_settings)
-            faction_call_count = [0]
+            mock_box = create_mock_profile_box()
+            profile_box_call_count = [0]
 
-            def mock_faction(img: Any) -> Faction | None:
-                faction_call_count[0] += 1
-                return Faction.COLONIAL if faction_call_count[0] == 1 else None
+            def mock_find_profile_box(img: Any) -> ProfileBoxResult | None:
+                profile_box_call_count[0] += 1
+                return mock_box if profile_box_call_count[0] == 1 else None
 
-            with patch.object(service, "_detect_faction", side_effect=mock_faction):
+            with patch.object(service, "_find_profile_box", side_effect=mock_find_profile_box):
                 result = service.verify(profile_bytes, shard_bytes)
 
                 assert result.name == "TestPlayer"
@@ -1285,13 +1353,14 @@ class TestVerificationServiceVerify:
             side_effect=mock_ocr,
         ):
             service = VerificationService(mock_settings)
-            faction_call_count = [0]
+            mock_box = create_mock_profile_box()
+            profile_box_call_count = [0]
 
-            def mock_faction(img: Any) -> Faction | None:
-                faction_call_count[0] += 1
-                return Faction.COLONIAL if faction_call_count[0] == 1 else None
+            def mock_find_profile_box(img: Any) -> ProfileBoxResult | None:
+                profile_box_call_count[0] += 1
+                return mock_box if profile_box_call_count[0] == 1 else None
 
-            with patch.object(service, "_detect_faction", side_effect=mock_faction):
+            with patch.object(service, "_find_profile_box", side_effect=mock_find_profile_box):
                 result = service.verify(profile_bytes, shard_bytes)
 
                 assert result.name == "TestPlayer"
@@ -1366,14 +1435,15 @@ class TestVerificationServiceVerify:
             side_effect=mock_ocr,
         ):
             service = VerificationService(mock_settings)
-            faction_call_count = [0]
+            mock_box = create_mock_profile_box()
+            profile_box_call_count = [0]
 
-            def mock_faction(img: Any) -> Faction | None:
-                faction_call_count[0] += 1
-                # Second image (profile) has faction
-                return Faction.COLONIAL if faction_call_count[0] == 2 else None
+            def mock_find_profile_box(img: Any) -> ProfileBoxResult | None:
+                profile_box_call_count[0] += 1
+                # Second image (profile) has profile box
+                return mock_box if profile_box_call_count[0] == 2 else None
 
-            with patch.object(service, "_detect_faction", side_effect=mock_faction):
+            with patch.object(service, "_find_profile_box", side_effect=mock_find_profile_box):
                 result = service.verify(shard_bytes, profile_bytes)
 
                 assert result.name == "SecondPlayer"
@@ -1420,17 +1490,21 @@ class TestVerificationServiceVerify:
             side_effect=mock_ocr,
         ):
             service = VerificationService(mock_settings)
-            faction_call_count = [0]
+            mock_box = create_mock_profile_box()
+            profile_box_call_count = [0]
 
-            def mock_faction(img: Any) -> Faction | None:
-                faction_call_count[0] += 1
-                return Faction.COLONIAL if faction_call_count[0] == 1 else None
+            def mock_find_profile_box(img: Any) -> ProfileBoxResult | None:
+                profile_box_call_count[0] += 1
+                return mock_box if profile_box_call_count[0] == 1 else None
 
-            with patch.object(service, "_detect_faction", side_effect=mock_faction):
-                service.verify(profile_bytes, shard_bytes)
+            with patch.object(service, "_find_profile_box", side_effect=mock_find_profile_box):
+                with patch.object(
+                    service, "_detect_faction_with_scaled_template", return_value=Faction.COLONIAL
+                ):
+                    service.verify(profile_bytes, shard_bytes)
 
-                assert os.path.exists(tmp_path / "debug_image1_regions.png")
-                assert os.path.exists(tmp_path / "debug_image2_regions.png")
+                    # The debug image is saved as debug_profile_regions.png
+                    assert os.path.exists(tmp_path / "debug_profile_regions.png")
 
     def test_verify_includes_shard_and_ingame_time(
         self,
@@ -1468,13 +1542,14 @@ class TestVerificationServiceVerify:
             side_effect=mock_ocr,
         ):
             service = VerificationService(mock_settings)
-            faction_call_count = [0]
+            mock_box = create_mock_profile_box()
+            profile_box_call_count = [0]
 
-            def mock_faction(img: Any) -> Faction | None:
-                faction_call_count[0] += 1
-                return Faction.COLONIAL if faction_call_count[0] == 1 else None
+            def mock_find_profile_box(img: Any) -> ProfileBoxResult | None:
+                profile_box_call_count[0] += 1
+                return mock_box if profile_box_call_count[0] == 1 else None
 
-            with patch.object(service, "_detect_faction", side_effect=mock_faction):
+            with patch.object(service, "_find_profile_box", side_effect=mock_find_profile_box):
                 result = service.verify(profile_bytes, shard_bytes)
 
                 assert result.shard == "ABLE"
@@ -1523,13 +1598,14 @@ class TestVerificationServiceVerify:
             side_effect=mock_ocr,
         ):
             service = VerificationService(mock_settings)
-            faction_call_count = [0]
+            mock_box = create_mock_profile_box()
+            profile_box_call_count = [0]
 
-            def mock_faction(img: Any) -> Faction | None:
-                faction_call_count[0] += 1
-                return Faction.COLONIAL if faction_call_count[0] == 1 else None
+            def mock_find_profile_box(img: Any) -> ProfileBoxResult | None:
+                profile_box_call_count[0] += 1
+                return mock_box if profile_box_call_count[0] == 1 else None
 
-            with patch.object(service, "_detect_faction", side_effect=mock_faction):
+            with patch.object(service, "_find_profile_box", side_effect=mock_find_profile_box):
                 result = service.verify(profile_bytes, shard_bytes)
 
                 assert result.war_number == 132
@@ -1572,13 +1648,14 @@ class TestVerificationServiceVerify:
             side_effect=mock_ocr,
         ):
             service = VerificationService(mock_settings)
-            faction_call_count = [0]
+            mock_box = create_mock_profile_box()
+            profile_box_call_count = [0]
 
-            def mock_faction(img: Any) -> Faction | None:
-                faction_call_count[0] += 1
-                return Faction.COLONIAL if faction_call_count[0] == 1 else None
+            def mock_find_profile_box(img: Any) -> ProfileBoxResult | None:
+                profile_box_call_count[0] += 1
+                return mock_box if profile_box_call_count[0] == 1 else None
 
-            with patch.object(service, "_detect_faction", side_effect=mock_faction):
+            with patch.object(service, "_find_profile_box", side_effect=mock_find_profile_box):
                 with pytest.raises(
                     ValueError, match="No shard information found in the map/shard image"
                 ):
@@ -1622,13 +1699,14 @@ class TestVerificationServiceVerify:
             side_effect=mock_ocr,
         ):
             service = VerificationService(mock_settings)
-            faction_call_count = [0]
+            mock_box = create_mock_profile_box()
+            profile_box_call_count = [0]
 
-            def mock_faction(img: Any) -> Faction | None:
-                faction_call_count[0] += 1
-                return Faction.COLONIAL if faction_call_count[0] == 1 else None
+            def mock_find_profile_box(img: Any) -> ProfileBoxResult | None:
+                profile_box_call_count[0] += 1
+                return mock_box if profile_box_call_count[0] == 1 else None
 
-            with patch.object(service, "_detect_faction", side_effect=mock_faction):
+            with patch.object(service, "_find_profile_box", side_effect=mock_find_profile_box):
                 result = service.verify(profile_bytes, shard_bytes)
 
                 assert result.ingame_time == "100, 12:00"
@@ -1681,7 +1759,7 @@ class TestVerificationServiceIntegration:
 
         assert result.name is not None
         assert result.level is not None
-        assert result.faction == Faction.WARDENS
+        assert result.faction == Faction.WARDEN
         # Warden image has no regiment
         assert result.regiment is None
 
@@ -1798,9 +1876,8 @@ class TestVerificationServiceIntegration:
 
         service = VerificationService(mock_settings)
 
-        with patch.object(
-            service, "_calculate_regions", side_effect=cv2.error("Test OpenCV error")
-        ):
+        # Mock profile box to throw OpenCV error
+        with patch.object(service, "_find_profile_box", side_effect=cv2.error("Test OpenCV error")):
             with pytest.raises(RuntimeError, match="Image processing error"):
                 service.verify(image_bytes, image_bytes)
 
@@ -1821,14 +1898,15 @@ class TestVerificationServiceIntegration:
 
         service = VerificationService(integration_settings)
 
-        # First mock faction detection to work, then fail on _find_user_info
-        faction_call_count = [0]
+        # First mock profile box detection to work, then fail on _find_user_info
+        mock_box = create_mock_profile_box()
+        profile_box_call_count = [0]
 
-        def mock_faction(img: Any) -> Faction | None:
-            faction_call_count[0] += 1
-            return Faction.COLONIAL if faction_call_count[0] == 1 else None
+        def mock_find_profile_box(img: Any) -> ProfileBoxResult | None:
+            profile_box_call_count[0] += 1
+            return mock_box if profile_box_call_count[0] == 1 else None
 
-        with patch.object(service, "_detect_faction", side_effect=mock_faction):
+        with patch.object(service, "_find_profile_box", side_effect=mock_find_profile_box):
             with patch.object(
                 service,
                 "_find_user_info",
@@ -1854,6 +1932,485 @@ class TestVerificationServiceIntegration:
 
         service = VerificationService(mock_settings)
 
-        with patch.object(service, "_calculate_regions", side_effect=Exception("Unexpected error")):
-            with pytest.raises(RuntimeError, match="Internal processing error"):
-                service.verify(image_bytes, image_bytes)
+        with patch.object(
+            service, "_calculate_regions_from_grey_boxes", side_effect=Exception("Unexpected error")
+        ):
+            # Need to mock profile box detection first
+            mock_box = create_mock_profile_box()
+            profile_box_call_count = [0]
+
+            def mock_find_profile_box(img: Any) -> ProfileBoxResult | None:
+                profile_box_call_count[0] += 1
+                return mock_box if profile_box_call_count[0] == 1 else None
+
+            with patch.object(service, "_find_profile_box", side_effect=mock_find_profile_box):
+                with pytest.raises(RuntimeError, match="Internal processing error"):
+                    service.verify(image_bytes, image_bytes)
+
+
+class TestFindProfileBoxByBlack:
+    """Tests for _find_profile_box_by_black method edge cases."""
+
+    def test_rejects_box_at_origin(self, mock_settings: AppSettings) -> None:
+        """
+        Test that boxes at origin (0, 0) are rejected.
+
+        Args:
+            mock_settings: Mock settings fixture.
+        """
+        service = VerificationService(mock_settings)
+
+        # Create an image with a black rectangle at origin
+        img = np.ones((500, 800, 3), dtype=np.uint8) * 255
+        # Draw black rectangle at origin with correct aspect ratio (~6.09)
+        cv2.rectangle(img, (0, 0), (300, 49), (0, 0, 0), -1)
+
+        result = service._find_profile_box_by_black(img)
+        # Should be None because box is at origin
+        assert result is None
+
+    def test_rejects_box_too_wide(self, mock_settings: AppSettings) -> None:
+        """
+        Test that boxes wider than 50% of image width are rejected.
+
+        Args:
+            mock_settings: Mock settings fixture.
+        """
+        service = VerificationService(mock_settings)
+
+        # Create an image with a very wide black rectangle
+        img = np.ones((200, 400, 3), dtype=np.uint8) * 255
+        # Draw black rectangle that is > 50% of image width (aspect ratio ~6)
+        # Width 250 > 200 (50% of 400)
+        cv2.rectangle(img, (50, 50), (300, 91), (0, 0, 0), -1)
+
+        result = service._find_profile_box_by_black(img)
+        # Should be None because box is too wide
+        assert result is None
+
+
+class TestFindGreyBoxesPattern:
+    """Tests for _find_grey_boxes_pattern method."""
+
+    def test_returns_none_when_not_enough_candidates(
+        self,
+        mock_settings: AppSettings,
+    ) -> None:
+        """
+        Test that None is returned when fewer than 6 grey box candidates.
+
+        Args:
+            mock_settings: Mock settings fixture.
+        """
+        service = VerificationService(mock_settings)
+
+        # Create image with only a few grey regions
+        img = np.ones((500, 800, 3), dtype=np.uint8) * 255
+        # Add only 3 grey boxes (need at least 6)
+        cv2.rectangle(img, (50, 100), (100, 140), (50, 50, 50), -1)
+        cv2.rectangle(img, (120, 100), (170, 140), (50, 50, 50), -1)
+        cv2.rectangle(img, (190, 100), (240, 140), (50, 50, 50), -1)
+
+        result = service._find_grey_boxes_pattern(img)
+        assert result is None
+
+    def test_finds_valid_4_plus_2_pattern(self, mock_settings: AppSettings) -> None:
+        """
+        Test successful detection of 4+2 grey box pattern.
+
+        Args:
+            mock_settings: Mock settings fixture.
+        """
+        service = VerificationService(mock_settings)
+
+        # Create image with valid 4+2 pattern using correct grey values (20-100)
+        img = np.ones((300, 600, 3), dtype=np.uint8) * 200  # Light background
+
+        # Row 1: 4 grey boxes at y=50 (grey value 50 is in range 20-100)
+        # Boxes need to be within size constraints: h in (15,100), w in (30,500)
+        cv2.rectangle(img, (50, 50), (120, 80), (50, 50, 50), -1)  # w=70, h=30
+        cv2.rectangle(img, (140, 50), (210, 80), (50, 50, 50), -1)  # w=70, h=30
+        cv2.rectangle(img, (230, 50), (300, 80), (50, 50, 50), -1)  # w=70, h=30
+        cv2.rectangle(img, (320, 50), (390, 80), (50, 50, 50), -1)  # w=70, h=30
+
+        # Row 2: 2 grey boxes at y=85 (within row distance tolerance: 30 * 1.15 = 34.5)
+        cv2.rectangle(img, (100, 85), (200, 115), (50, 50, 50), -1)  # w=100, h=30
+        cv2.rectangle(img, (220, 85), (320, 115), (50, 50, 50), -1)  # w=100, h=30
+
+        result = service._find_grey_boxes_pattern(img)
+        assert result is not None
+        profile_box, grey_boxes = result
+        assert len(grey_boxes) == 4  # Row 1 boxes sorted by x
+
+    def test_returns_none_when_no_row2_found(self, mock_settings: AppSettings) -> None:
+        """
+        Test that None is returned when row 2 (2 boxes) is not found below row 1.
+
+        Args:
+            mock_settings: Mock settings fixture.
+        """
+        service = VerificationService(mock_settings)
+
+        # Create image with 4 boxes in row 1 but wrong count in row 2
+        img = np.ones((300, 600, 3), dtype=np.uint8) * 255
+
+        # Row 1: 4 grey boxes
+        cv2.rectangle(img, (50, 50), (100, 80), (50, 50, 50), -1)
+        cv2.rectangle(img, (120, 50), (170, 80), (50, 50, 50), -1)
+        cv2.rectangle(img, (190, 50), (240, 80), (50, 50, 50), -1)
+        cv2.rectangle(img, (260, 50), (310, 80), (50, 50, 50), -1)
+
+        # Row 2: 3 boxes instead of 2 (wrong pattern)
+        cv2.rectangle(img, (80, 90), (130, 120), (50, 50, 50), -1)
+        cv2.rectangle(img, (150, 90), (200, 120), (50, 50, 50), -1)
+        cv2.rectangle(img, (220, 90), (270, 120), (50, 50, 50), -1)
+
+        result = service._find_grey_boxes_pattern(img)
+        assert result is None
+
+
+class TestFindRow2Below:
+    """Tests for _find_row2_below method."""
+
+    def test_returns_none_when_row2_too_far(self, mock_settings: AppSettings) -> None:
+        """
+        Test that None is returned when row 2 is too far below row 1.
+
+        Args:
+            mock_settings: Mock settings fixture.
+        """
+        service = VerificationService(mock_settings)
+
+        row1_boxes = [
+            (50, 50, 50, 30),
+            (120, 50, 50, 30),
+            (190, 50, 50, 30),
+            (260, 50, 50, 30),
+        ]
+        # Row 2 is very far (y=200, much greater than avg_height * 1.15)
+        rows = {
+            50: row1_boxes,
+            200: [(80, 200, 70, 30), (170, 200, 70, 30)],
+        }
+
+        result = service._find_row2_below(
+            row1_y=50,
+            row1_boxes=row1_boxes,
+            sorted_row_ys=[200],
+            rows=rows,
+        )
+        assert result is None
+
+    def test_finds_row2_within_tolerance(self, mock_settings: AppSettings) -> None:
+        """
+        Test that row 2 is found when within distance tolerance.
+
+        Args:
+            mock_settings: Mock settings fixture.
+        """
+        service = VerificationService(mock_settings)
+
+        row1_boxes = [
+            (50, 50, 50, 30),
+            (120, 50, 50, 30),
+            (190, 50, 50, 30),
+            (260, 50, 50, 30),
+        ]
+        # Row 2 within tolerance (avg height 30 * 1.15 = 34.5, so y=80 is within)
+        rows = {
+            50: row1_boxes,
+            80: [(80, 80, 70, 30), (170, 80, 70, 30)],
+        }
+
+        result = service._find_row2_below(
+            row1_y=50,
+            row1_boxes=row1_boxes,
+            sorted_row_ys=[80],
+            rows=rows,
+        )
+        assert result == 80
+
+
+class TestCalculateProfileBoxFromRows:
+    """Tests for _calculate_profile_box_from_rows method."""
+
+    def test_calculates_profile_box_bounds(self, mock_settings: AppSettings) -> None:
+        """
+        Test that profile box is correctly calculated from row boxes.
+
+        Args:
+            mock_settings: Mock settings fixture.
+        """
+        service = VerificationService(mock_settings)
+
+        row1_boxes = [
+            (100, 50, 50, 30),
+            (160, 50, 50, 30),
+            (220, 50, 50, 30),
+            (280, 50, 50, 30),
+        ]
+        row2_boxes = [
+            (120, 90, 80, 30),
+            (210, 90, 80, 30),
+        ]
+
+        profile_box, grey_boxes = service._calculate_profile_box_from_rows(row1_boxes, row2_boxes)
+
+        # Profile box should encompass all boxes with expansion factors
+        assert profile_box[0] >= 0  # x
+        assert profile_box[1] >= 0  # y
+        assert profile_box[2] > 0  # width
+        assert profile_box[3] > 0  # height
+
+        # Grey boxes should be row1 sorted by x
+        assert len(grey_boxes) == 4
+        assert grey_boxes[0][0] < grey_boxes[1][0]  # Sorted by x
+
+
+class TestDetectFactionWithScaledTemplate:
+    """Tests for _detect_faction_with_scaled_template edge cases."""
+
+    def test_returns_none_for_empty_icon_region(
+        self,
+        mock_settings: AppSettings,
+    ) -> None:
+        """
+        Test that None is returned when icon region is empty.
+
+        Args:
+            mock_settings: Mock settings fixture.
+        """
+        service = VerificationService(mock_settings)
+        img = np.ones((100, 100, 3), dtype=np.uint8) * 255
+
+        # Create region where y1 == y2 (empty slice)
+        icon_region = Region(x1=10, y1=50, x2=60, y2=50)
+
+        result = service._detect_faction_with_scaled_template(
+            image=img,
+            icon_region=icon_region,
+            threshold=0.7,
+        )
+        assert result is None
+
+    def test_skips_template_larger_than_icon_region(
+        self,
+        mock_settings: AppSettings,
+    ) -> None:
+        """
+        Test that templates larger than icon region are skipped.
+
+        When the icon_region extends beyond image bounds, the sliced icon_img
+        will be smaller than expected, causing scaled template to not fit.
+
+        Args:
+            mock_settings: Mock settings fixture.
+        """
+        service = VerificationService(mock_settings)
+
+        # Create image where icon_region extends beyond bounds
+        # Image is 50x50, but region extends to y=60 (beyond image)
+        img = np.ones((50, 50, 3), dtype=np.uint8) * 255
+
+        # Region that extends beyond image bounds
+        # Expected: region_h = 20, region_w = 20, icon_size = 20
+        # But actual slice will be truncated to (10, 20) since image ends at y=50
+        icon_region = Region(x1=10, y1=40, x2=30, y2=60)
+
+        # Set template - after resize to icon_size=20, it will be 20x20
+        # But icon_img will only be 10x20 (truncated), so 20 > 10 triggers skip
+        service.colonial_icon = np.ones((100, 100, 3), dtype=np.uint8)
+
+        result = service._detect_faction_with_scaled_template(
+            image=img,
+            icon_region=icon_region,
+            threshold=0.7,
+        )
+        # Should return None because scaled template (20x20) won't fit in icon_img (10x20)
+        assert result is None
+
+
+class TestFindShardDynamic:
+    """Tests for _find_shard_dynamic method."""
+
+    def test_extracts_shard_from_time_pattern(
+        self,
+        mock_settings: AppSettings,
+    ) -> None:
+        """
+        Test extraction of shard name from line after time pattern.
+
+        Args:
+            mock_settings: Mock settings fixture.
+        """
+        service = VerificationService(mock_settings)
+        img = np.ones((100, 200, 3), dtype=np.uint8) * 255
+
+        # Mock pytesseract to return text with time pattern
+        with patch(
+            "verification_ocr.services.verification_service.pytesseract.image_to_string",
+            return_value="Day 154, 2335 Hours\nABLE\nSome other text",
+        ):
+            shard, ingame_time = service._find_shard_dynamic(img)
+
+        assert shard == "ABLE"
+        assert ingame_time is not None
+        assert "154" in ingame_time
+
+    def test_returns_none_when_no_time_pattern(
+        self,
+        mock_settings: AppSettings,
+    ) -> None:
+        """
+        Test that (None, None) is returned when no time pattern found.
+
+        Args:
+            mock_settings: Mock settings fixture.
+        """
+        service = VerificationService(mock_settings)
+        img = np.ones((100, 200, 3), dtype=np.uint8) * 255
+
+        with patch(
+            "verification_ocr.services.verification_service.pytesseract.image_to_string",
+            return_value="No time pattern here\nJust random text",
+        ):
+            shard, ingame_time = service._find_shard_dynamic(img)
+
+        assert shard is None
+        assert ingame_time is None
+
+    def test_returns_none_shard_when_no_next_line(
+        self,
+        mock_settings: AppSettings,
+    ) -> None:
+        """
+        Test that shard is None when time pattern is on last line.
+
+        Args:
+            mock_settings: Mock settings fixture.
+        """
+        service = VerificationService(mock_settings)
+        img = np.ones((100, 200, 3), dtype=np.uint8) * 255
+
+        # Time pattern on last line, no shard line after
+        with patch(
+            "verification_ocr.services.verification_service.pytesseract.image_to_string",
+            return_value="Day 154, 2335 Hours",
+        ):
+            shard, ingame_time = service._find_shard_dynamic(img)
+
+        assert shard is None
+        # Time should still be extracted
+        assert ingame_time is not None
+
+
+class TestFindProfileBoxGreyBoxFallback:
+    """Tests for _find_profile_box grey box fallback path."""
+
+    def test_uses_grey_pattern_when_black_detection_fails(
+        self,
+        mock_settings: AppSettings,
+    ) -> None:
+        """
+        Test that grey box pattern is used when black box detection fails.
+
+        Args:
+            mock_settings: Mock settings fixture.
+        """
+        service = VerificationService(mock_settings)
+        img = np.ones((300, 600, 3), dtype=np.uint8) * 255
+
+        # Mock black box detection to return None
+        with patch.object(service, "_find_profile_box_by_black", return_value=None):
+            # Mock grey pattern to return valid result
+            mock_box = (50, 40, 300, 100)
+            mock_grey_boxes = [
+                (60, 50, 50, 30),
+                (120, 50, 50, 30),
+                (180, 50, 50, 30),
+                (240, 50, 50, 30),
+            ]
+            with patch.object(
+                service,
+                "_find_grey_boxes_pattern",
+                return_value=(mock_box, mock_grey_boxes),
+            ):
+                # Mock faction detection to succeed
+                with patch.object(
+                    service,
+                    "_detect_faction_with_scaled_template",
+                    return_value=Faction.COLONIAL,
+                ):
+                    result = service._find_profile_box(img)
+
+        assert result is not None
+        box, grey_boxes = result
+        assert box == mock_box
+        assert grey_boxes == mock_grey_boxes
+
+
+class TestExtractProfileDataGreyBoxesNone:
+    """Tests for _extract_profile_data when grey_boxes is None."""
+
+    def test_calculates_grey_boxes_when_none(
+        self,
+        mock_settings: AppSettings,
+    ) -> None:
+        """
+        Test that grey boxes are calculated from black box when None.
+
+        Args:
+            mock_settings: Mock settings fixture.
+        """
+        service = VerificationService(mock_settings)
+        img = np.ones((500, 800, 3), dtype=np.uint8) * 255
+        profile_box = (100, 100, 500, 90)
+
+        with patch.object(service, "_extract_text_from_image", return_value="TestPlayer"):
+            with patch.object(
+                service,
+                "_detect_faction_with_scaled_template",
+                return_value=Faction.COLONIAL,
+            ):
+                verification, regions = service._extract_profile_data(
+                    profile_img=img,
+                    profile_box=profile_box,
+                    grey_boxes=None,  # Explicitly None
+                )
+
+        assert verification.name == "TestPlayer"
+        assert regions is not None
+
+
+class TestGetShardAndTimeDebugMode:
+    """Tests for _get_shard_and_time debug mode."""
+
+    def test_saves_debug_image_when_debug_mode_enabled(
+        self,
+        mock_settings: AppSettings,
+        tmp_path: pathlib.Path,
+    ) -> None:
+        """
+        Test that processed shard image is saved in debug mode.
+
+        Args:
+            mock_settings: Mock settings fixture.
+            tmp_path: Pytest temp directory.
+        """
+        mock_settings.ocr.debug_mode = True
+        mock_settings.ocr.debug_output_dir = str(tmp_path)
+
+        service = VerificationService(mock_settings)
+
+        img = np.ones((500, 800, 3), dtype=np.uint8) * 255
+        regions = create_test_regions(service, img)
+
+        with patch(
+            "verification_ocr.services.verification_service.pytesseract.image_to_string",
+            return_value="100, 1200\nABLE",
+        ):
+            service._get_shard_and_time(image=img, regions=regions)
+
+        # Check debug image was saved
+        debug_file = tmp_path / "debug_shard_processed.png"
+        assert debug_file.exists()
