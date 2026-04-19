@@ -476,16 +476,26 @@ class VerificationService:
                 if w < PROFILE_BOX_MIN_WIDTH or h < PROFILE_BOX_MIN_HEIGHT or h == 0:
                     continue
 
-                ratio = w / h
-                ratio_diff = abs(ratio - PROFILE_BOX_ASPECT_RATIO)
-
-                if ratio_diff >= PROFILE_BOX_ASPECT_RATIO_TOLERANCE:
-                    continue
-
                 # Reject boxes at origin or too large (merging with background)
                 if x == 0 and y == 0:
                     continue
                 if w / img_w > PROFILE_BOX_MAX_WIDTH_RATIO:
+                    continue
+
+                # Trim top rows that aren't mostly black (e.g., shadow spikes)
+                # Find where the actual black content starts (>90% black pixels)
+                for row_offset in range(h):
+                    row = gray[y + row_offset, x : x + w]
+                    black_pct = np.sum(row < thresh) / w
+                    if black_pct > 0.9:
+                        y = y + row_offset
+                        h = h - row_offset
+                        break
+
+                ratio = w / h
+                ratio_diff = abs(ratio - PROFILE_BOX_ASPECT_RATIO)
+
+                if ratio_diff >= PROFILE_BOX_ASPECT_RATIO_TOLERANCE:
                     continue
 
                 if ratio_diff < best_score:
