@@ -7,6 +7,15 @@ name = "verification-ocr"
 version = "0.1.0"
 description = "Verification service using OpenCV and Tesseract OCR"
 readme = "README.md"
+license = {text = "MIT"}
+authors = [{name = "Jorge García", email = "jgroca@gmail.com"}]
+keywords = ["foxhole", "verification", "ocr", "image-processing", "fastapi"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3 :: Only",
+]
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.115.0,<1.0.0",
@@ -31,6 +40,9 @@ dev = [
     "mypy>=1.10.0",
     "pre-commit>=3.0.0",
 ]
+
+[project.urls]
+Repository = "https://github.com/xurxogr/verification-ocr"
 
 [project.scripts]
 vocr = "verification_ocr.cli:main"
@@ -65,7 +77,18 @@ line-length = 100
 target-version = "py312"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "W"]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "UP",  # pyupgrade
+    "D",   # pydocstyle (docstring checks)
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -93,7 +116,11 @@ omit = [
 exclude_lines = [
     "pragma: no cover",
     "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
     "raise NotImplementedError",
 ]
 fail_under = 95
 show_missing = true
+
+[tool.coverage.html]
+directory = "htmlcov"

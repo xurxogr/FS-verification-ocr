@@ -7,19 +7,17 @@ from verification_ocr.core.settings.app_settings import AppSettings
 
 @lru_cache
 def get_settings() -> AppSettings:
-    """
-    Get cached application settings singleton.
+    """Get cached application settings singleton.
 
-        AppSettings: The application settings instance.
+    AppSettings: The application settings instance.
     """
     return AppSettings()
 
 
 def reload_settings() -> AppSettings:
-    """
-    Clear settings cache and reload.
+    """Clear settings cache and reload.
 
-        AppSettings: The newly loaded application settings instance.
+    AppSettings: The newly loaded application settings instance.
     """
     get_settings.cache_clear()
     return get_settings()

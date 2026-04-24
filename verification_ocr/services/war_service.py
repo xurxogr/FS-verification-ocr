@@ -21,8 +21,7 @@ class WarService:
 
     @property
     def state(self) -> WarState:
-        """
-        Get the current war state.
+        """Get the current war state.
 
         Returns:
             WarState: The current war state.
@@ -34,8 +33,7 @@ class WarService:
         war_number: int | None = None,
         start_time: int | None = None,
     ) -> None:
-        """
-        Initialize war state from settings.
+        """Initialize war state from settings.
 
         Args:
             war_number: War number from settings.
@@ -44,8 +42,7 @@ class WarService:
         self._state = WarState(war_number=war_number, start_time=start_time)
 
     async def fetch_from_api(self) -> WarState | None:
-        """
-        Fetch war data from Foxhole API.
+        """Fetch war data from Foxhole API.
 
         Returns:
             WarState | None: War state if successful, None otherwise.
@@ -79,8 +76,7 @@ class WarService:
             return None
 
     async def sync_from_api(self) -> bool:
-        """
-        Fetch war data from Foxhole API and update the state.
+        """Fetch war data from Foxhole API and update the state.
 
         Returns:
             bool: True if sync was successful, False otherwise.
@@ -94,8 +90,7 @@ class WarService:
 
 @lru_cache
 def get_war_service() -> WarService:
-    """
-    Get the war service singleton.
+    """Get the war service singleton.
 
     Returns:
         WarService: The war service instance.

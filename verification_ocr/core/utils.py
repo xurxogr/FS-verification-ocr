@@ -14,8 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 def calculate_war_time(start_time: int) -> tuple[int, int, int]:
-    """
-    Calculate war day, hour, and minute from start time.
+    """Calculate war day, hour, and minute from start time.
 
     Args:
         start_time (int): War start time in milliseconds.
@@ -47,8 +46,7 @@ class HealthCheckFilter(logging.Filter):
     """Filter to exclude health check requests from access logs."""
 
     def filter(self, record: logging.LogRecord) -> bool:
-        """
-        Filter out health check log entries.
+        """Filter out health check log entries.
 
         Args:
             record (logging.LogRecord): Log record to check.
@@ -63,10 +61,9 @@ class HealthCheckFilter(logging.Filter):
 
 
 def get_tesseract_version() -> str | None:
-    """
-    Get Tesseract version string.
+    """Get Tesseract version string.
 
-        str | None: Version string if tesseract is available, None otherwise.
+    str | None: Version string if tesseract is available, None otherwise.
     """
     tesseract_path = shutil.which("tesseract")
     if not tesseract_path:
@@ -90,8 +87,7 @@ def get_tesseract_version() -> str | None:
 
 
 def _get_handler_by_name(root_logger: logging.Logger, name: str) -> logging.Handler | None:
-    """
-    Get a handler by name from a logger.
+    """Get a handler by name from a logger.
 
     Args:
         root_logger (logging.Logger): Logger to search.
@@ -106,8 +102,7 @@ def _get_handler_by_name(root_logger: logging.Logger, name: str) -> logging.Hand
 
 
 def _remove_handler_by_name(root_logger: logging.Logger, name: str) -> None:
-    """
-    Remove a handler by name from a logger.
+    """Remove a handler by name from a logger.
 
     Args:
         root_logger (logging.Logger): Logger to remove from.
@@ -121,8 +116,7 @@ def _remove_handler_by_name(root_logger: logging.Logger, name: str) -> None:
 
 
 def _get_min_level(root_level: str, loggers: dict[str, str]) -> int:
-    """
-    Get the minimum log level from root and all custom loggers.
+    """Get the minimum log level from root and all custom loggers.
 
     Args:
         root_level (str): The root logger level string.
@@ -137,8 +131,7 @@ def _get_min_level(root_level: str, loggers: dict[str, str]) -> int:
 
 
 def setup_logging(settings: LoggingSettings) -> None:
-    """
-    Setup logging configuration for the application.
+    """Setup logging configuration for the application.
 
     Args:
         settings (LoggingSettings): Logging settings to configure logging.

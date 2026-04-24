@@ -88,8 +88,7 @@ ROW_DISTANCE_TOLERANCE_FACTOR = 1.15
 
 
 def extract_day_and_hour(text: str) -> str:
-    """
-    Extract days and hours from a formatted string.
+    """Extract days and hours from a formatted string.
 
     Args:
         text (str): Input text containing numbers and commas.
@@ -113,8 +112,7 @@ def extract_day_and_hour(text: str) -> str:
 
 
 def parse_ingame_time(ingame_time: str) -> tuple[int, int, int] | None:
-    """
-    Parse in-game time string to day, hour, minute.
+    """Parse in-game time string to day, hour, minute.
 
     Args:
         ingame_time (str): Time string like "267, 21:45".
@@ -157,8 +155,7 @@ def calculate_ingame_time_diff(
     current_day: int,
     current_hour: int,
 ) -> int:
-    """
-    Calculate the absolute difference in in-game hours between two times.
+    """Calculate the absolute difference in in-game hours between two times.
 
     Args:
         extracted_day (int): Day from screenshot.
@@ -177,8 +174,7 @@ def calculate_ingame_time_diff(
 
 
 def get_current_ingame_time() -> tuple[int, int, int] | None:
-    """
-    Get the current in-game time from war state.
+    """Get the current in-game time from war state.
 
     Returns:
         tuple[int, int, int] | None: (day, hour, minute) or None if not configured.
@@ -195,8 +191,7 @@ class VerificationService:
     """Service for processing and comparing two images using OCR."""
 
     def __init__(self, settings: AppSettings) -> None:
-        """
-        Initialize the verification service.
+        """Initialize the verification service.
 
         Args:
             settings (AppSettings): Application settings instance.
@@ -245,8 +240,7 @@ class VerificationService:
         scale: bool = False,
         use_invert: bool = True,
     ) -> str:
-        """
-        Extract text from an image using OCR.
+        """Extract text from an image using OCR.
 
         Args:
             image (cv2.typing.MatLike): Image to extract text from.
@@ -295,8 +289,7 @@ class VerificationService:
         image: cv2.typing.MatLike,
         scale_factor: float,
     ) -> cv2.typing.MatLike:
-        """
-        Prepare image for shard/time text detection.
+        """Prepare image for shard/time text detection.
 
         Uses Otsu's thresholding (same as foxhole-stockpiles) to automatically
         determine optimal threshold based on image histogram.
@@ -348,8 +341,7 @@ class VerificationService:
         image: cv2.typing.MatLike,
         template: cv2.typing.MatLike,
     ) -> float:
-        """
-        Match a template against an image region.
+        """Match a template against an image region.
 
         Args:
             image (cv2.typing.MatLike): Image to search in.
@@ -384,8 +376,7 @@ class VerificationService:
         self,
         image: cv2.typing.MatLike,
     ) -> tuple[tuple[int, int, int, int], list[tuple[int, int, int, int]]] | None:
-        """
-        Detect the black profile box in the image.
+        """Detect the black profile box in the image.
 
         Uses two detection methods:
         1. Direct black box detection (for full screenshots)
@@ -448,12 +439,14 @@ class VerificationService:
         thresh: int,
         border_black_pct: float = 0.9,
     ) -> tuple[int, int, int, int]:
-        """
-        Shrink box until all four borders are continuous black lines.
+        """Shrink box until all four borders are continuous black lines.
 
         Args:
             gray: Grayscale image.
-            x, y, w, h: Initial box coordinates.
+            x: Initial box x coordinate.
+            y: Initial box y coordinate.
+            w: Initial box width.
+            h: Initial box height.
             thresh: Black threshold value.
             border_black_pct: Required percentage of black pixels in border.
 
@@ -498,8 +491,7 @@ class VerificationService:
         self,
         image: cv2.typing.MatLike,
     ) -> tuple[int, int, int, int] | None:
-        """
-        Detect profile box by finding black rectangle with correct aspect ratio.
+        """Detect profile box by finding black rectangle with correct aspect ratio.
 
         Args:
             image: Image to search in.
@@ -559,8 +551,7 @@ class VerificationService:
         self,
         image: cv2.typing.MatLike,
     ) -> tuple[tuple[int, int, int, int], list[tuple[int, int, int, int]]] | None:
-        """
-        Find the 4+2 grey box pattern and return both the profile box and grey boxes.
+        """Find the 4+2 grey box pattern and return both the profile box and grey boxes.
 
         Looks for 4 grey boxes in row 1 followed by 2 grey boxes in row 2.
 
@@ -642,8 +633,7 @@ class VerificationService:
         sorted_row_ys: list[int],
         rows: dict[int, list[tuple[int, int, int, int]]],
     ) -> int | None:
-        """
-        Find the second row (2 boxes) below the first row (4 boxes).
+        """Find the second row (2 boxes) below the first row (4 boxes).
 
         Args:
             row1_y: Y position of row 1.
@@ -670,8 +660,7 @@ class VerificationService:
         row1_boxes: list[tuple[int, int, int, int]],
         row2_boxes: list[tuple[int, int, int, int]],
     ) -> tuple[tuple[int, int, int, int], list[tuple[int, int, int, int]]]:
-        """
-        Calculate profile box bounds from the detected grey box rows.
+        """Calculate profile box bounds from the detected grey box rows.
 
         Args:
             row1_boxes: 4 boxes from row 1 (username, icon, level, rank).
@@ -703,8 +692,7 @@ class VerificationService:
         self,
         box: tuple[int, int, int, int],
     ) -> list[tuple[int, int, int, int]]:
-        """
-        Calculate grey box positions from the black profile box.
+        """Calculate grey box positions from the black profile box.
 
         The grey boxes are at fixed ratios within the black box.
         Returns [username, icon, level, rank] boxes.
@@ -756,8 +744,7 @@ class VerificationService:
         box: tuple[int, int, int, int],
         grey_boxes: list[tuple[int, int, int, int]],
     ) -> ImageRegions:
-        """
-        Calculate region coordinates from grey box positions.
+        """Calculate region coordinates from grey box positions.
 
         Args:
             image: The image.
@@ -826,8 +813,7 @@ class VerificationService:
         icon_region: Region,
         threshold: float,
     ) -> Faction | None:
-        """
-        Detect faction by matching scaled master icons against the icon region.
+        """Detect faction by matching scaled master icons against the icon region.
 
         Args:
             image: The full image.
@@ -889,8 +875,7 @@ class VerificationService:
         self,
         image: cv2.typing.MatLike,
     ) -> tuple[str | None, str | None]:
-        """
-        Find shard and time dynamically by searching for the time pattern.
+        """Find shard and time dynamically by searching for the time pattern.
 
         The shard name is always on the line immediately after the time.
         Time format: digits + comma + 4 digits (e.g., "Day 154, 2335 Hours").
@@ -927,8 +912,7 @@ class VerificationService:
         image: cv2.typing.MatLike,
         threshold: float,
     ) -> Faction | None:
-        """
-        Detect faction from the icon region using template matching.
+        """Detect faction from the icon region using template matching.
 
         Matches against both colonial and wardens icons and returns the faction
         with the highest confidence above threshold.
@@ -964,8 +948,7 @@ class VerificationService:
         regions: ImageRegions,
         filename: str,
     ) -> None:
-        """
-        Save debug image with detected regions drawn.
+        """Save debug image with detected regions drawn.
 
         Args:
             image (cv2.typing.MatLike): Original image.
@@ -1093,8 +1076,7 @@ class VerificationService:
         image: cv2.typing.MatLike,
         regions: ImageRegions,
     ) -> Verification:
-        """
-        Extract user information from the image.
+        """Extract user information from the image.
 
         Extracts name, level, regiment status, and faction.
 
@@ -1144,8 +1126,7 @@ class VerificationService:
         return data
 
     def _parse_regiment_name(self, text: str) -> str | None:
-        """
-        Parse regiment name from OCR text.
+        """Parse regiment name from OCR text.
 
         Format: [TAG#NUM] Regiment Name (something) - we extract [TAG#NUM] Regiment Name
 
@@ -1196,8 +1177,7 @@ class VerificationService:
         image: cv2.typing.MatLike,
         regions: ImageRegions,
     ) -> tuple[str | None, str | None]:
-        """
-        Extract shard and in-game time from the image.
+        """Extract shard and in-game time from the image.
 
         The shard region contains both timestamp (line 1) and shard name (line 2).
 
@@ -1252,8 +1232,7 @@ class VerificationService:
         image1_bytes: bytes,
         image2_bytes: bytes,
     ) -> tuple[MatLike, MatLike]:
-        """
-        Decode image bytes and validate minimum dimensions.
+        """Decode image bytes and validate minimum dimensions.
 
         Args:
             image1_bytes: First image bytes.
@@ -1288,8 +1267,7 @@ class VerificationService:
         img1: MatLike,
         img2: MatLike,
     ) -> tuple[MatLike, MatLike, tuple[int, int, int, int], list[tuple[int, int, int, int]]]:
-        """
-        Determine which image is profile and which is shard based on profile box detection.
+        """Determine which image is profile and which is shard based on profile box detection.
 
         Args:
             img1: First decoded image.
@@ -1332,8 +1310,7 @@ class VerificationService:
         profile_box: tuple[int, int, int, int],
         grey_boxes: list[tuple[int, int, int, int]] | None,
     ) -> tuple[Verification, ImageRegions]:
-        """
-        Extract verification data from the profile image.
+        """Extract verification data from the profile image.
 
         Args:
             profile_img: The profile image.
@@ -1381,8 +1358,7 @@ class VerificationService:
         shard_img: MatLike,
         verification: Verification,
     ) -> Verification:
-        """
-        Extract shard and war data and add to verification.
+        """Extract shard and war data and add to verification.
 
         Args:
             shard_img: The shard/map image.
@@ -1415,8 +1391,7 @@ class VerificationService:
         return verification
 
     def verify(self, image1_bytes: bytes, image2_bytes: bytes) -> Verification:
-        """
-        Process two images and extract user verification information.
+        """Process two images and extract user verification information.
 
         Args:
             image1_bytes: First image bytes.

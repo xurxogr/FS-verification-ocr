@@ -22,8 +22,7 @@ class WarState(BaseModel):
     )
 
     def is_configured(self) -> bool:
-        """
-        Check if war state is configured.
+        """Check if war state is configured.
 
         Returns:
             bool: True if both war_number and start_time are set.

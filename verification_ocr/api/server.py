@@ -61,8 +61,7 @@ def rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded) -> Res
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """
-    Application lifespan manager.
+    """Application lifespan manager.
 
     Args:
         app (FastAPI): The FastAPI application instance.
@@ -116,10 +115,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 def create_app() -> FastAPI:
-    """
-    Create and configure the FastAPI application.
+    """Create and configure the FastAPI application.
 
-        FastAPI: The configured FastAPI application instance.
+    FastAPI: The configured FastAPI application instance.
     """
     settings = get_settings()
 
@@ -159,10 +157,9 @@ app = create_app()
 
 @app.get("/", include_in_schema=False, response_model=None)
 async def index() -> FileResponse | dict[str, str]:
-    """
-    Serve the frontend.
+    """Serve the frontend.
 
-        FileResponse | dict[str, str]: The index.html file or a JSON message with docs link.
+    FileResponse | dict[str, str]: The index.html file or a JSON message with docs link.
     """
     settings = get_settings()
 
@@ -181,10 +178,9 @@ async def index() -> FileResponse | dict[str, str]:
 
 @app.get("/health", response_model=HealthResponse)
 async def health_check() -> HealthResponse:
-    """
-    Health check endpoint (no auth required).
+    """Health check endpoint (no auth required).
 
-        HealthResponse: Health status including version and tesseract availability.
+    HealthResponse: Health status including version and tesseract availability.
     """
     return HealthResponse(
         status="healthy",
@@ -195,8 +191,7 @@ async def health_check() -> HealthResponse:
 
 @app.get("/war", response_model=WarResponse)
 async def get_war_info() -> WarResponse:
-    """
-    Get current war information.
+    """Get current war information.
 
     Returns:
         WarResponse: War number and calculated war day/time based on start time.
@@ -224,8 +219,7 @@ async def get_war_info() -> WarResponse:
 async def sync_war(
     _api_key: Annotated[str | None, Depends(verify_api_key)],
 ) -> dict[str, Any]:
-    """
-    Sync war data from Foxhole API and return updated war info.
+    """Sync war data from Foxhole API and return updated war info.
 
     Requires API key authentication if configured.
 
@@ -262,8 +256,7 @@ async def verify_images(
     service: Annotated[VerificationService, Depends(get_verification_service)],
     _api_key: Annotated[str | None, Depends(verify_api_key)],
 ) -> Verification:
-    """
-    Verify user from two game screenshots.
+    """Verify user from two game screenshots.
 
     Upload two images to extract user information (name, level, regiment,
     faction, shard) using OCR and template matching.
@@ -304,6 +297,6 @@ async def verify_images(
             image2_bytes=image2_bytes,
         )
     except ValueError as e:
-        raise HTTPException(status_code=422, detail=str(e))
+        raise HTTPException(status_code=422, detail=str(e)) from None
     except RuntimeError as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from None

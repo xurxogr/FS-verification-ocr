@@ -9,10 +9,9 @@ from verification_ocr.core.settings import get_settings
 
 
 def main() -> int:
-    """
-    Main CLI entry point.
+    """Main CLI entry point.
 
-        int: Exit code (0 for success).
+    int: Exit code (0 for success).
     """
     parser = argparse.ArgumentParser(
         description="Verification OCR Service",
@@ -37,8 +36,7 @@ def main() -> int:
 
 
 def run_server(args: argparse.Namespace) -> int:
-    """
-    Run the API server.
+    """Run the API server.
 
     Args:
         args (argparse.Namespace): Parsed command line arguments.

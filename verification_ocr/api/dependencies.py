@@ -14,18 +14,16 @@ api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
 @lru_cache
 def get_verification_service() -> VerificationService:
-    """
-    Get cached verification service singleton.
+    """Get cached verification service singleton.
 
-        VerificationService: The verification service instance.
+    VerificationService: The verification service instance.
     """
     settings = get_settings()
     return VerificationService(settings)
 
 
 def verify_api_key(api_key: str | None = Security(api_key_header)) -> str | None:
-    """
-    Verify API key from request header.
+    """Verify API key from request header.
 
     Args:
         api_key: API key from X-API-Key header.
@@ -63,8 +61,5 @@ def verify_api_key(api_key: str | None = Security(api_key_header)) -> str | None
 
 
 def clear_dependency_caches() -> None:
-    """
-    Clear all dependency caches.
-
-    """
+    """Clear all dependency caches."""
     get_verification_service.cache_clear()
