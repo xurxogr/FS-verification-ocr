@@ -58,7 +58,6 @@ RANK_X_START = 0.739
 RANK_WIDTH = 0.220  # 0.959 - 0.739
 
 # Regiment region ratios (below profile box)
-REGIMENT_X_START = 0.334
 REGIMENT_X_END = 1.082
 REGIMENT_Y_OFFSET = 0.539  # Below box bottom
 REGIMENT_HEIGHT = 0.283
@@ -439,6 +438,62 @@ class VerificationService:
 
         return (box, grey_boxes)
 
+    def _shrink_to_black_borders(
+        self,
+        gray: cv2.typing.MatLike,
+        x: int,
+        y: int,
+        w: int,
+        h: int,
+        thresh: int,
+        border_black_pct: float = 0.9,
+    ) -> tuple[int, int, int, int]:
+        """
+        Shrink box until all four borders are continuous black lines.
+
+        Args:
+            gray: Grayscale image.
+            x, y, w, h: Initial box coordinates.
+            thresh: Black threshold value.
+            border_black_pct: Required percentage of black pixels in border.
+
+        Returns:
+            Tuple (x, y, w, h) of shrunk box.
+        """
+        img_h, img_w = gray.shape[:2]
+
+        # Shrink from top until border is black
+        while h > PROFILE_BOX_MIN_HEIGHT:
+            row = gray[y, x : x + w]
+            if np.sum(row < thresh) / w >= border_black_pct:
+                break
+            y += 1
+            h -= 1
+
+        # Shrink from bottom until border is black
+        while h > PROFILE_BOX_MIN_HEIGHT:
+            row = gray[y + h - 1, x : x + w]
+            if np.sum(row < thresh) / w >= border_black_pct:
+                break
+            h -= 1
+
+        # Shrink from left until border is black
+        while w > PROFILE_BOX_MIN_WIDTH:
+            col = gray[y : y + h, x]
+            if np.sum(col < thresh) / h >= border_black_pct:
+                break
+            x += 1
+            w -= 1
+
+        # Shrink from right until border is black
+        while w > PROFILE_BOX_MIN_WIDTH:
+            col = gray[y : y + h, x + w - 1]
+            if np.sum(col < thresh) / h >= border_black_pct:
+                break
+            w -= 1
+
+        return x, y, w, h
+
     def _find_profile_box_by_black(
         self,
         image: cv2.typing.MatLike,
@@ -482,15 +537,11 @@ class VerificationService:
                 if w / img_w > PROFILE_BOX_MAX_WIDTH_RATIO:
                     continue
 
-                # Trim top rows that aren't mostly black (e.g., shadow spikes)
-                # Find where the actual black content starts (>90% black pixels)
-                for row_offset in range(h):
-                    row = gray[y + row_offset, x : x + w]
-                    black_pct = np.sum(row < thresh) / w
-                    if black_pct > 0.9:
-                        y = y + row_offset
-                        h = h - row_offset
-                        break
+                # Shrink box until all borders are continuous black lines
+                x, y, w, h = self._shrink_to_black_borders(gray, x, y, w, h, thresh)
+
+                if w < PROFILE_BOX_MIN_WIDTH or h < PROFILE_BOX_MIN_HEIGHT:
+                    continue
 
                 ratio = w / h
                 ratio_diff = abs(ratio - PROFILE_BOX_ASPECT_RATIO)
@@ -727,8 +778,8 @@ class VerificationService:
         icon_box = grey_boxes[1]
         level_box = grey_boxes[2]
 
-        # Regiment is below the profile box - calculate from box dimensions
-        regiment_x1 = box_x + int(box_width * REGIMENT_X_START)
+        # Regiment is below the profile box - starts from middle of icon box to the right
+        regiment_x1 = icon_box[0] + icon_box[2] // 2
         regiment_x2 = min(img_width, box_x + int(box_width * REGIMENT_X_END))
         regiment_y1 = box_y + box_height + int(box_height * REGIMENT_Y_OFFSET)
         regiment_y2 = regiment_y1 + int(box_height * REGIMENT_HEIGHT)
