@@ -85,6 +85,10 @@ SHARD_WIDTH_MULTIPLIER = 3.5
 SHARD_DYNAMIC_WIDTH_RATIO = 0.20  # Left 20% of image width
 SHARD_DYNAMIC_HEIGHT_RATIO = 0.15  # Bottom 15% of image height
 
+# Content detection threshold for images pasted on white/gray canvas
+CONTENT_DETECTION_THRESHOLD = 240  # Pixels darker than this are considered content
+CONTENT_MARGIN_RATIO = 0.10  # Minimum content ratio to trigger cropping
+
 # Scale threshold for enabling OCR upscaling (below this, text is too small)
 SCALE_UPSCALE_THRESHOLD = 0.9
 
@@ -876,6 +880,79 @@ class VerificationService:
 
         return best_faction
 
+    def _crop_to_content_bounds(
+        self,
+        image: cv2.typing.MatLike,
+    ) -> cv2.typing.MatLike:
+        """Crop image to actual content bounds, removing white/gray canvas padding.
+
+        Handles cases where users paste screenshots onto a larger white canvas.
+
+        Args:
+            image: Image that may have padding.
+
+        Returns:
+            Cropped image containing only the actual content.
+        """
+        img_h, img_w = image.shape[:2]
+        gray = cv2.cvtColor(src=image, code=cv2.COLOR_BGR2GRAY)
+
+        # Find pixels that are actual content (not near-white)
+        content_mask = gray < CONTENT_DETECTION_THRESHOLD
+
+        # Check if there's significant non-content area (padding)
+        content_ratio = np.sum(content_mask) / content_mask.size
+        if content_ratio > (1 - CONTENT_MARGIN_RATIO):
+            # Most of the image is content, no significant padding
+            return image
+
+        # Find bounding box of content
+        rows_with_content = np.any(content_mask, axis=1)
+        cols_with_content = np.any(content_mask, axis=0)
+
+        if not np.any(rows_with_content) or not np.any(cols_with_content):
+            # No content found, return original
+            return image
+
+        y_min = int(np.argmax(rows_with_content))
+        y_max = int(len(rows_with_content) - np.argmax(rows_with_content[::-1]))
+        x_min = int(np.argmax(cols_with_content))
+        x_max = int(len(cols_with_content) - np.argmax(cols_with_content[::-1]))
+
+        # Validate bounds
+        if y_max <= y_min or x_max <= x_min:
+            return image
+
+        return image[y_min:y_max, x_min:x_max]
+
+    def _parse_shard_from_text(
+        self,
+        text: str,
+    ) -> tuple[str | None, str | None]:
+        """Parse shard and time from OCR text.
+
+        Args:
+            text: OCR text to parse.
+
+        Returns:
+            Tuple of (shard, ingame_time). Either can be None if not found.
+        """
+        lines = [line.strip() for line in text.split("\n") if line.strip()]
+
+        # Find the line with time pattern, shard is the next line
+        for i, line in enumerate(lines):
+            # Look for pattern: digits + comma + 4 digits (e.g., "154, 2335" or "Day 154, 2335")
+            if re.search(r"\d{1,4}\s*,\s*\d{4}", line):
+                found_time = extract_day_and_hour(line)
+                if found_time and "," in found_time and ":" in found_time:
+                    # Shard is on the next line (may not exist)
+                    found_shard = None
+                    if i + 1 < len(lines):
+                        found_shard = lines[i + 1].upper().strip()
+                    return found_shard, found_time
+
+        return None, None
+
     def _find_shard_dynamic(
         self,
         image: cv2.typing.MatLike,
@@ -885,40 +962,35 @@ class VerificationService:
         The shard name is always on the line immediately after the time.
         Time format: digits + comma + 4 digits (e.g., "Day 154, 2335 Hours").
 
+        Handles images pasted on white canvas by detecting content bounds.
+        First tries bottom-left crop to avoid chat/squad list text contamination.
+        Falls back to full image OCR for unusual image dimensions or crops.
+
         Args:
             image: Shard/map image to extract from.
 
         Returns:
             Tuple of (shard, ingame_time) or (None, None) if not found.
         """
-        img_h, img_w = image.shape[:2]
+        # First, crop to actual content bounds (handles images pasted on white canvas)
+        content_image = self._crop_to_content_bounds(image)
+        img_h, img_w = content_image.shape[:2]
 
-        # Crop to bottom-left region where shard info panel is located
+        # Try: crop to bottom-left region where shard info panel is located
         # This avoids picking up text from chat/squad list on the right side
         crop_w = int(img_w * SHARD_DYNAMIC_WIDTH_RATIO)
         crop_h = int(img_h * SHARD_DYNAMIC_HEIGHT_RATIO)
-        cropped = image[img_h - crop_h : img_h, 0:crop_w]
+        cropped = content_image[img_h - crop_h : img_h, 0:crop_w]
 
-        # OCR the cropped region
         text = pytesseract.image_to_string(cropped, lang=self.settings.ocr.language)
+        shard, ingame_time = self._parse_shard_from_text(text)
 
-        lines = [line.strip() for line in text.split("\n") if line.strip()]
+        if shard is not None:
+            return shard, ingame_time
 
-        found_time: str | None = None
-        found_shard: str | None = None
-
-        # Find the line with time pattern, shard is the next line
-        for i, line in enumerate(lines):
-            # Look for pattern: digits + comma + 4 digits (e.g., "154, 2335" or "Day 154, 2335")
-            if re.search(r"\d{1,4}\s*,\s*\d{4}", line):
-                found_time = extract_day_and_hour(line)
-                if found_time and "," in found_time and ":" in found_time:
-                    # Shard is on the next line
-                    if i + 1 < len(lines):
-                        found_shard = lines[i + 1].upper().strip()
-                    break
-
-        return found_shard, found_time
+        # Fallback: OCR the full content image for unusual dimensions or crops
+        text = pytesseract.image_to_string(content_image, lang=self.settings.ocr.language)
+        return self._parse_shard_from_text(text)
 
     def _detect_faction(
         self,
