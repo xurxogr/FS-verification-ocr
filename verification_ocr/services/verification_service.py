@@ -80,6 +80,11 @@ PROFILE_ROW2_BOX_COUNT = 2
 SHARD_Y_OFFSET_MULTIPLIER = 3
 SHARD_WIDTH_MULTIPLIER = 3.5
 
+# Dynamic shard detection crop ratios (relative to image dimensions)
+# Crops to bottom-left region to avoid picking up chat/squad list on right
+SHARD_DYNAMIC_WIDTH_RATIO = 0.20  # Left 20% of image width
+SHARD_DYNAMIC_HEIGHT_RATIO = 0.15  # Bottom 15% of image height
+
 # Scale threshold for enabling OCR upscaling (below this, text is too small)
 SCALE_UPSCALE_THRESHOLD = 0.9
 
@@ -886,8 +891,16 @@ class VerificationService:
         Returns:
             Tuple of (shard, ingame_time) or (None, None) if not found.
         """
-        # OCR the entire image
-        text = pytesseract.image_to_string(image, lang=self.settings.ocr.language)
+        img_h, img_w = image.shape[:2]
+
+        # Crop to bottom-left region where shard info panel is located
+        # This avoids picking up text from chat/squad list on the right side
+        crop_w = int(img_w * SHARD_DYNAMIC_WIDTH_RATIO)
+        crop_h = int(img_h * SHARD_DYNAMIC_HEIGHT_RATIO)
+        cropped = image[img_h - crop_h : img_h, 0:crop_w]
+
+        # OCR the cropped region
+        text = pytesseract.image_to_string(cropped, lang=self.settings.ocr.language)
 
         lines = [line.strip() for line in text.split("\n") if line.strip()]
 
