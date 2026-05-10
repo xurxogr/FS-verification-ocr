@@ -20,7 +20,8 @@ from verification_ocr.api.dependencies import get_verification_service, verify_a
 from verification_ocr.core.settings import get_settings
 from verification_ocr.core.utils import calculate_war_time, get_tesseract_version, setup_logging
 from verification_ocr.models import HealthResponse, Verification, WarResponse
-from verification_ocr.services import VerificationService, get_war_service
+from verification_ocr.services import get_war_service
+from verification_ocr.services.ocr import OCRService
 
 logger = logging.getLogger(__name__)
 
@@ -253,7 +254,7 @@ async def verify_images(
     request: Request,
     image1: Annotated[UploadFile, File(description="First image")],
     image2: Annotated[UploadFile, File(description="Second image")],
-    service: Annotated[VerificationService, Depends(get_verification_service)],
+    service: Annotated[OCRService, Depends(get_verification_service)],
     _api_key: Annotated[str | None, Depends(verify_api_key)],
 ) -> Verification:
     """Verify user from two game screenshots.
@@ -267,7 +268,7 @@ async def verify_images(
         request (Request): The request object (required for rate limiting).
         image1 (UploadFile): First screenshot (profile or map).
         image2 (UploadFile): Second screenshot (profile or map).
-        service (VerificationService): Injected verification service.
+        service (OCRService): Injected verification service.
 
     Returns:
         Verification: Extracted verification data.

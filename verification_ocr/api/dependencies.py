@@ -6,20 +6,21 @@ from fastapi import HTTPException, Security
 from fastapi.security import APIKeyHeader
 
 from verification_ocr.core.settings import get_settings
-from verification_ocr.services.verification_service import VerificationService
+from verification_ocr.services.ocr import OCRService
 
 # API key header scheme
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
 
 @lru_cache
-def get_verification_service() -> VerificationService:
+def get_verification_service() -> OCRService:
     """Get cached verification service singleton.
 
-    VerificationService: The verification service instance.
+    Returns:
+        OCRService: The OCR service instance.
     """
     settings = get_settings()
-    return VerificationService(settings)
+    return OCRService(settings)
 
 
 def verify_api_key(api_key: str | None = Security(api_key_header)) -> str | None:

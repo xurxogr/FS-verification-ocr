@@ -3,7 +3,7 @@
 import io
 import pathlib
 import time
-from typing import Any, TypeAlias
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import cv2
@@ -24,8 +24,9 @@ from verification_ocr.core.settings import get_settings
 from verification_ocr.enums import Faction
 from verification_ocr.services import get_war_service
 
-# Type alias for profile box result: (box, grey_boxes)
-ProfileBoxResult: TypeAlias = tuple[tuple[int, int, int, int], list[tuple[int, int, int, int]]]
+# Type alias for profile boxes result
+type ProfileBoxes = list[tuple[int, int, int, int]]
+type ShardBox = tuple[int, int, int, int]
 
 
 class TestLifespan:
@@ -349,18 +350,18 @@ class TestVerifyEndpoint:
         _, buffer = cv2.imencode(".png", img)
         return buffer.tobytes()
 
-    def _create_mock_profile_box(
-        self,
-    ) -> ProfileBoxResult:
-        """Create a mock profile box tuple for testing."""
-        box = (100, 100, 500, 90)
-        grey_boxes = [
-            (100, 110, 150, 30),  # username
-            (260, 110, 50, 30),  # icon
-            (320, 110, 100, 30),  # level
-            (430, 110, 100, 30),  # rank
+    def _create_mock_profile_boxes(self) -> ProfileBoxes:
+        """Create mock profile boxes for testing."""
+        return [
+            (100, 110, 150, 70),  # username
+            (260, 110, 50, 70),  # icon
+            (320, 110, 100, 70),  # level
+            (430, 200, 100, 50),  # regiment
         ]
-        return (box, grey_boxes)
+
+    def _create_mock_shard_box(self) -> ShardBox:
+        """Create mock shard box for testing."""
+        return (50, 900, 340, 92)
 
     def test_verify_with_valid_images(self, test_client: TestClient) -> None:
         """Test verify endpoint with valid images."""
@@ -374,43 +375,47 @@ class TestVerifyEndpoint:
             if call_count[0] == 1:
                 return "TestUser"  # username
             if call_count[0] == 2:
-                return "Level: 15"  # level
+                return "15"  # level
             if call_count[0] == 3:
                 return ""  # regiment
-            return "100, 1200\nABLE"  # shard
+            return "Location\n100, 1200 Hours\nABLE"  # shard
 
         profile_box_call_count = [0]
-        mock_profile_box = self._create_mock_profile_box()
+        mock_profile_boxes = self._create_mock_profile_boxes()
 
-        def mock_find_profile_box(*args: Any, **kwargs: Any) -> ProfileBoxResult | None:
+        def mock_detect_profile(*args: Any, **kwargs: Any) -> ProfileBoxes | None:
             profile_box_call_count[0] += 1
             # First image is profile, second is shard (returns None)
-            return mock_profile_box if profile_box_call_count[0] == 1 else None
+            return mock_profile_boxes if profile_box_call_count[0] == 1 else None
 
         with patch(
-            "verification_ocr.services.verification_service.pytesseract.image_to_string",
+            "verification_ocr.services.ocr.service.pytesseract.image_to_string",
             side_effect=mock_ocr,
         ):
             with patch(
-                "verification_ocr.services.verification_service.VerificationService._find_profile_box",
-                side_effect=mock_find_profile_box,
+                "verification_ocr.services.ocr.service.detect_profile_boxes",
+                side_effect=mock_detect_profile,
             ):
                 with patch(
-                    "verification_ocr.services.verification_service.VerificationService._detect_faction_with_scaled_template",
-                    return_value=Faction.COLONIAL,
+                    "verification_ocr.services.ocr.service.detect_shard_box",
+                    return_value=self._create_mock_shard_box(),
                 ):
-                    response = test_client.post(
-                        "/foxhole/verify",
-                        files={
-                            "image1": ("test1.png", io.BytesIO(profile_bytes), "image/png"),
-                            "image2": ("test2.png", io.BytesIO(shard_bytes), "image/png"),
-                        },
-                    )
+                    with patch(
+                        "verification_ocr.services.ocr.service.OCRService._detect_faction",
+                        return_value=Faction.COLONIAL,
+                    ):
+                        response = test_client.post(
+                            "/foxhole/verify",
+                            files={
+                                "image1": ("test1.png", io.BytesIO(profile_bytes), "image/png"),
+                                "image2": ("test2.png", io.BytesIO(shard_bytes), "image/png"),
+                            },
+                        )
 
-                    assert response.status_code == 200
-                    data = response.json()
-                    assert data["name"] == "TestUser"
-                    assert data["level"] == 15
+                        assert response.status_code == 200
+                        data = response.json()
+                        assert data["name"] == "TestUser"
+                        assert data["level"] == 15
 
     def test_verify_missing_image1(self, test_client: TestClient) -> None:
         """Test verify endpoint with missing image1."""
@@ -436,13 +441,13 @@ class TestVerifyEndpoint:
 
         assert response.status_code == 422
 
-    def test_verify_returns_error_when_no_name_found(self, test_client: TestClient) -> None:
+    def test_verify_returns_error_when_no_profile_detected(self, test_client: TestClient) -> None:
         """Test that verify returns 422 error when no profile box detected."""
         image_bytes = self._create_test_image()
 
         # Both images return None (no profile box), so error is raised
         with patch(
-            "verification_ocr.services.verification_service.VerificationService._find_profile_box",
+            "verification_ocr.services.ocr.service.detect_profile_boxes",
             return_value=None,
         ):
             response = test_client.post(
@@ -455,14 +460,14 @@ class TestVerifyEndpoint:
 
             assert response.status_code == 422
             data = response.json()
-            assert "Could not identify profile image" in data["detail"]
+            assert "Could not detect profile boxes" in data["detail"]
 
     def test_verify_returns_500_on_runtime_error(self, test_client: TestClient) -> None:
         """Test that verify returns 500 error on RuntimeError."""
         image_bytes = self._create_test_image()
 
         with patch(
-            "verification_ocr.services.verification_service.VerificationService.verify",
+            "verification_ocr.services.ocr.service.OCRService.verify",
             side_effect=RuntimeError("Processing failed"),
         ):
             response = test_client.post(
@@ -646,6 +651,19 @@ class TestApiKeyAuthentication:
         _, buffer = cv2.imencode(".png", img)
         return buffer.tobytes()
 
+    def _create_mock_profile_boxes(self) -> ProfileBoxes:
+        """Create mock profile boxes for testing."""
+        return [
+            (100, 110, 150, 70),  # username
+            (260, 110, 50, 70),  # icon
+            (320, 110, 100, 70),  # level
+            (430, 200, 100, 50),  # regiment
+        ]
+
+    def _create_mock_shard_box(self) -> ShardBox:
+        """Create mock shard box for testing."""
+        return (50, 900, 340, 92)
+
     def test_verify_api_key_disabled(self, test_client: TestClient) -> None:
         """Test that API key is not required when disabled."""
         settings = get_settings()
@@ -722,51 +740,46 @@ class TestApiKeyAuthentication:
             if call_count[0] == 1:
                 return "TestUser"  # username
             if call_count[0] == 2:
-                return "Level: 15"  # level
+                return "15"  # level
             if call_count[0] == 3:
                 return ""  # regiment
-            return "100, 1200\nABLE"  # shard
+            return "Location\n100, 1200 Hours\nABLE"  # shard
 
         profile_box_call_count = [0]
-        # Mock profile box with grey boxes
-        mock_profile_box = (
-            (100, 100, 500, 90),  # box
-            [
-                (100, 110, 150, 30),  # username
-                (260, 110, 50, 30),  # icon
-                (320, 110, 100, 30),  # level
-                (430, 110, 100, 30),  # rank
-            ],
-        )
+        mock_profile_boxes = self._create_mock_profile_boxes()
 
-        def mock_find_profile_box(*args: Any, **kwargs: Any) -> ProfileBoxResult | None:
+        def mock_detect_profile(*args: Any, **kwargs: Any) -> ProfileBoxes | None:
             profile_box_call_count[0] += 1
             # First image is profile, second is shard (returns None)
-            return mock_profile_box if profile_box_call_count[0] == 1 else None
+            return mock_profile_boxes if profile_box_call_count[0] == 1 else None
 
         # Enable API key requirement
         with patch.object(settings.api_server, "api_key", "test-secret-key"):
             with patch(
-                "verification_ocr.services.verification_service.pytesseract.image_to_string",
+                "verification_ocr.services.ocr.service.pytesseract.image_to_string",
                 side_effect=mock_ocr,
             ):
                 with patch(
-                    "verification_ocr.services.verification_service.VerificationService._find_profile_box",
-                    side_effect=mock_find_profile_box,
+                    "verification_ocr.services.ocr.service.detect_profile_boxes",
+                    side_effect=mock_detect_profile,
                 ):
                     with patch(
-                        "verification_ocr.services.verification_service.VerificationService._detect_faction_with_scaled_template",
-                        return_value=Faction.COLONIAL,
+                        "verification_ocr.services.ocr.service.detect_shard_box",
+                        return_value=self._create_mock_shard_box(),
                     ):
-                        response = test_client.post(
-                            "/foxhole/verify",
-                            files={
-                                "image1": ("test1.png", io.BytesIO(profile_bytes), "image/png"),
-                                "image2": ("test2.png", io.BytesIO(shard_bytes), "image/png"),
-                            },
-                            headers={"X-API-Key": "test-secret-key"},
-                        )
-                        assert response.status_code == 200
+                        with patch(
+                            "verification_ocr.services.ocr.service.OCRService._detect_faction",
+                            return_value=Faction.COLONIAL,
+                        ):
+                            response = test_client.post(
+                                "/foxhole/verify",
+                                files={
+                                    "image1": ("test1.png", io.BytesIO(profile_bytes), "image/png"),
+                                    "image2": ("test2.png", io.BytesIO(shard_bytes), "image/png"),
+                                },
+                                headers={"X-API-Key": "test-secret-key"},
+                            )
+                            assert response.status_code == 200
 
 
 class TestFrontendServing:
