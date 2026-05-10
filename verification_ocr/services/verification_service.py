@@ -11,15 +11,12 @@ import pytesseract
 from cv2.typing import MatLike
 
 from verification_ocr.core.settings import AppSettings
-from verification_ocr.core.utils import calculate_war_time
+from verification_ocr.core.utils import calculate_war_time, extract_day_and_hour
 from verification_ocr.enums import Faction
 from verification_ocr.models import ImageRegions, Region, Verification
 from verification_ocr.services.war_service import get_war_service
 
 logger = logging.getLogger(__name__)
-
-# Threshold for binary image conversion (same as foxhole_stockpiles)
-TESSERACT_BINARY_THRESHOLD = 127
 
 # Profile box dimensions at 2160p (4K reference resolution)
 PROFILE_BOX_WIDTH_4K = 1096
@@ -94,92 +91,6 @@ SCALE_UPSCALE_THRESHOLD = 0.9
 
 # Row distance tolerance factor for grey box pattern detection
 ROW_DISTANCE_TOLERANCE_FACTOR = 1.15
-
-
-def extract_day_and_hour(text: str) -> str:
-    """Extract days and hours from a formatted string.
-
-    Args:
-        text (str): Input text containing numbers and commas.
-
-    Returns:
-        str: Formatted string with days and hours, e.g. "1234, 15:30".
-    """
-    # Find all digit/comma groups and join
-    result = "".join(re.findall(pattern=r"[\d,]+", string=text))
-    # Remove first comma if exactly two commas
-    if result.count(",") == 2:
-        result = result.replace(",", "", 1)
-    # Try to split into left/right by first comma
-    parts = result.split(",", 1)
-    if len(parts) == 2:
-        left, right = parts
-        digits = re.sub(pattern=r"\D", repl="", string=right)
-        if len(digits) == 4:
-            return f"{left}, {digits[:2]}:{digits[2:]}"
-    return result
-
-
-def parse_ingame_time(ingame_time: str) -> tuple[int, int, int] | None:
-    """Parse in-game time string to day, hour, minute.
-
-    Args:
-        ingame_time (str): Time string like "267, 21:45".
-
-    Returns:
-        tuple[int, int, int] | None: (day, hour, minute) or None if parsing fails.
-    """
-    try:
-        # Format: "267, 21:45"
-        parts = ingame_time.split(", ")
-        if len(parts) != 2:
-            return None
-
-        day = int(parts[0].strip())
-        # Validate day is within reasonable bounds (1-9999)
-        if day < 1 or day > 9999:
-            return None
-
-        time_parts = parts[1].split(":")
-        if len(time_parts) != 2:
-            return None
-
-        hour = int(time_parts[0])
-        minute = int(time_parts[1])
-
-        # Validate hour (0-23) and minute (0-59) ranges
-        if not (0 <= hour <= 23):
-            return None
-        if not (0 <= minute <= 59):
-            return None
-
-        return day, hour, minute
-    except (ValueError, IndexError):
-        return None
-
-
-def calculate_ingame_time_diff(
-    extracted_day: int,
-    extracted_hour: int,
-    current_day: int,
-    current_hour: int,
-) -> int:
-    """Calculate the absolute difference in in-game hours between two times.
-
-    Args:
-        extracted_day (int): Day from screenshot.
-        extracted_hour (int): Hour from screenshot.
-        current_day (int): Current calculated day.
-        current_hour (int): Current calculated hour.
-
-    Returns:
-        int: Absolute difference in in-game hours.
-    """
-    # Convert both times to total in-game hours
-    extracted_total = (extracted_day * 24) + extracted_hour
-    current_total = (current_day * 24) + current_hour
-
-    return abs(extracted_total - current_total)
 
 
 def get_current_ingame_time() -> tuple[int, int, int] | None:
@@ -462,8 +373,6 @@ class VerificationService:
         Returns:
             Tuple (x, y, w, h) of shrunk box.
         """
-        img_h, img_w = gray.shape[:2]
-
         # Shrink from top until border is black
         while h > PROFILE_BOX_MIN_HEIGHT:
             row = gray[y, x : x + w]
@@ -508,7 +417,7 @@ class VerificationService:
         Returns:
             Tuple (x, y, width, height) or None if not found.
         """
-        img_h, img_w = image.shape[:2]
+        _, img_w = image.shape[:2]
         gray = cv2.cvtColor(src=image, code=cv2.COLOR_BGR2GRAY)
 
         best_match = None
@@ -581,12 +490,12 @@ class VerificationService:
         )
         contours, _ = cv2.findContours(
             image=grey_mask,
-            mode=cv2.RETR_EXTERNAL,
+            mode=cv2.RETR_LIST,
             method=cv2.CHAIN_APPROX_SIMPLE,
         )
 
         # Filter for rectangular regions that could be profile sub-boxes
-        candidates = []
+        candidates: list[tuple[int, int, int, int]] = []
         for cnt in contours:
             x, y, w, h = cv2.boundingRect(cnt)
             if (
@@ -991,41 +900,6 @@ class VerificationService:
         # Fallback: OCR the full content image for unusual dimensions or crops
         text = pytesseract.image_to_string(content_image, lang=self.settings.ocr.language)
         return self._parse_shard_from_text(text)
-
-    def _detect_faction(
-        self,
-        image: cv2.typing.MatLike,
-        threshold: float,
-    ) -> Faction | None:
-        """Detect faction from the icon region using template matching.
-
-        Matches against both colonial and wardens icons and returns the faction
-        with the highest confidence above threshold.
-
-        Args:
-            image (cv2.typing.MatLike): Icon region image.
-            threshold: Minimum match confidence to accept.
-
-        Returns:
-            Faction | None: Detected faction, or None if no match above threshold.
-        """
-        colonial_score = 0.0
-        wardens_score = 0.0
-
-        if self.colonial_icon is not None:
-            colonial_score = self._match_template(image=image, template=self.colonial_icon)
-
-        if self.warden_icon is not None:
-            wardens_score = self._match_template(image=image, template=self.warden_icon)
-
-        # Return the faction with the highest score above threshold
-        if colonial_score >= threshold and colonial_score >= wardens_score:
-            return Faction.COLONIAL
-        if wardens_score >= threshold and wardens_score > colonial_score:
-            return Faction.WARDEN
-
-        # No faction detected above threshold
-        return None
 
     def _save_debug_image(
         self,

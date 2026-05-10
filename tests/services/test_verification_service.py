@@ -3,7 +3,7 @@
 import os
 import pathlib
 import time
-from typing import Any, TypeAlias
+from typing import Any
 from unittest.mock import patch
 
 import cv2
@@ -12,24 +12,21 @@ import pytesseract
 import pytest
 
 from verification_ocr.core.settings import AppSettings
+from verification_ocr.core.utils import extract_day_and_hour
 from verification_ocr.enums import Faction
 from verification_ocr.models import ImageRegions, Region
 from verification_ocr.services import get_war_service
 from verification_ocr.services.verification_service import (
     VerificationService,
-    calculate_ingame_time_diff,
-    extract_day_and_hour,
     get_current_ingame_time,
-    parse_ingame_time,
 )
 
 # Type alias for profile box result: (box, grey_boxes)
-ProfileBoxResult: TypeAlias = tuple[tuple[int, int, int, int], list[tuple[int, int, int, int]]]
+type ProfileBoxResult = tuple[tuple[int, int, int, int], list[tuple[int, int, int, int]]]
 
 
 def create_mock_profile_box() -> ProfileBoxResult:
-    """
-    Create a mock profile box result for testing.
+    """Create a mock profile box result for testing.
 
     Returns a tuple of (box, grey_boxes) that can be returned by _find_profile_box.
     """
@@ -47,8 +44,7 @@ def create_test_regions(
     service: VerificationService,
     img: np.ndarray,
 ) -> ImageRegions:
-    """
-    Create ImageRegions for testing using the new unified API.
+    """Create ImageRegions for testing using the new unified API.
 
     Creates a profile box based on image dimensions (at 2160p ratio),
     calculates grey boxes, and returns regions.
@@ -77,8 +73,7 @@ class TestParseRegimentName:
     """Tests for _parse_regiment_name method."""
 
     def test_returns_none_for_empty_text(self, mock_settings: AppSettings) -> None:
-        """
-        Test that None is returned for empty text.
+        """Test that None is returned for empty text.
 
         Args:
             mock_settings (AppSettings): Mock settings fixture.
@@ -89,8 +84,7 @@ class TestParseRegimentName:
         assert result is None
 
     def test_extracts_regiment_with_tag(self, mock_settings: AppSettings) -> None:
-        """
-        Test extraction of regiment name with tag.
+        """Test extraction of regiment name with tag.
 
         Args:
             mock_settings (AppSettings): Mock settings fixture.
@@ -101,8 +95,7 @@ class TestParseRegimentName:
         assert result == "[TAG] My Regiment"
 
     def test_removes_players_suffix(self, mock_settings: AppSettings) -> None:
-        """
-        Test that '| Players' suffix is removed.
+        """Test that '| Players' suffix is removed.
 
         Args:
             mock_settings (AppSettings): Mock settings fixture.
@@ -113,8 +106,7 @@ class TestParseRegimentName:
         assert result == "[I PHAETON 7th Hispanic Platoon"
 
     def test_cleans_whitespace(self, mock_settings: AppSettings) -> None:
-        """
-        Test that extra whitespace is cleaned up.
+        """Test that extra whitespace is cleaned up.
 
         Args:
             mock_settings (AppSettings): Mock settings fixture.
@@ -125,8 +117,7 @@ class TestParseRegimentName:
         assert result == "[TAG] My Regiment"
 
     def test_returns_none_for_whitespace_only(self, mock_settings: AppSettings) -> None:
-        """
-        Test that None is returned for whitespace-only text.
+        """Test that None is returned for whitespace-only text.
 
         Args:
             mock_settings (AppSettings): Mock settings fixture.
@@ -141,32 +132,22 @@ class TestExtractDayAndHour:
     """Tests for extract_day_and_hour function."""
 
     def test_extracts_day_and_hour_with_two_commas(self) -> None:
-        """
-        Test extraction with two commas in input.
-
-        """
+        """Test extraction with two commas in input."""
         result = extract_day_and_hour("Day 1,234, 15:30")
         assert result == "1234, 15:30"
 
     def test_extracts_day_and_hour_standard_format(self) -> None:
-        """
-        Test extraction with standard format.
-
-        """
+        """Test extraction with standard format."""
         result = extract_day_and_hour("1234, 1530")
         assert result == "1234, 15:30"
 
     def test_returns_raw_result_when_no_time(self) -> None:
-        """
-        Test that raw result is returned when time format not found.
-
-        """
+        """Test that raw result is returned when time format not found."""
         result = extract_day_and_hour("12345")
         assert result == "12345"
 
     def test_returns_raw_result_when_digits_not_four(self) -> None:
-        """
-        Test that raw result is returned when right side has != 4 digits.
+        """Test that raw result is returned when right side has != 4 digits.
 
         Covers the branch when len(parts) == 2 but len(digits) != 4.
 
@@ -176,177 +157,27 @@ class TestExtractDayAndHour:
         assert result == "100,123"
 
     def test_returns_formatted_when_extra_digits(self) -> None:
-        """
-        Test when right side has more than 4 digits.
-
-        """
+        """Test when right side has more than 4 digits."""
         # "12345" has 5 digits, not 4
         result = extract_day_and_hour("100, 12345")
         assert result == "100,12345"
 
     def test_handles_empty_string(self) -> None:
-        """
-        Test handling of empty string.
-
-        """
+        """Test handling of empty string."""
         result = extract_day_and_hour("")
         assert result == ""
-
-
-class TestParseIngameTime:
-    """Tests for parse_ingame_time function."""
-
-    def test_parses_valid_time(self) -> None:
-        """
-        Test parsing valid time string.
-
-        """
-        result = parse_ingame_time("267, 21:45")
-        assert result == (267, 21, 45)
-
-    def test_returns_none_for_invalid_format(self) -> None:
-        """
-        Test returns None for invalid format.
-
-        """
-        result = parse_ingame_time("invalid")
-        assert result is None
-
-    def test_returns_none_for_missing_time(self) -> None:
-        """
-        Test returns None when time part is missing.
-
-        """
-        result = parse_ingame_time("267")
-        assert result is None
-
-    def test_returns_none_for_invalid_time_format(self) -> None:
-        """
-        Test returns None for invalid time format.
-
-        """
-        result = parse_ingame_time("267, 2145")
-        assert result is None
-
-    def test_returns_none_for_non_numeric_values(self) -> None:
-        """
-        Test returns None for non-numeric values.
-
-        """
-        result = parse_ingame_time("abc, de:fg")
-        assert result is None
-
-    def test_returns_none_for_day_less_than_one(self) -> None:
-        """
-        Test returns None when day is less than 1.
-
-        """
-        result = parse_ingame_time("0, 12:30")
-        assert result is None
-
-    def test_returns_none_for_day_greater_than_9999(self) -> None:
-        """
-        Test returns None when day exceeds 9999.
-
-        """
-        result = parse_ingame_time("10000, 12:30")
-        assert result is None
-
-    def test_returns_none_for_hour_out_of_range(self) -> None:
-        """
-        Test returns None when hour is outside 0-23 range.
-
-        """
-        result = parse_ingame_time("267, 24:30")
-        assert result is None
-
-        result = parse_ingame_time("267, 25:30")
-        assert result is None
-
-    def test_returns_none_for_minute_out_of_range(self) -> None:
-        """
-        Test returns None when minute is outside 0-59 range.
-
-        """
-        result = parse_ingame_time("267, 12:60")
-        assert result is None
-
-        result = parse_ingame_time("267, 12:99")
-        assert result is None
-
-
-class TestCalculateIngameTimeDiff:
-    """Tests for calculate_ingame_time_diff function."""
-
-    def test_same_time_returns_zero(self) -> None:
-        """
-        Test that same times return zero difference.
-
-        """
-        result = calculate_ingame_time_diff(
-            extracted_day=267,
-            extracted_hour=21,
-            current_day=267,
-            current_hour=21,
-        )
-        assert result == 0
-
-    def test_one_hour_difference(self) -> None:
-        """
-        Test one hour difference.
-
-        """
-        result = calculate_ingame_time_diff(
-            extracted_day=267,
-            extracted_hour=21,
-            current_day=267,
-            current_hour=22,
-        )
-        assert result == 1
-
-    def test_one_day_difference(self) -> None:
-        """
-        Test one day difference.
-
-        """
-        result = calculate_ingame_time_diff(
-            extracted_day=267,
-            extracted_hour=0,
-            current_day=268,
-            current_hour=0,
-        )
-        assert result == 24
-
-    def test_returns_absolute_difference(self) -> None:
-        """
-        Test that absolute difference is returned.
-
-        """
-        result = calculate_ingame_time_diff(
-            extracted_day=268,
-            extracted_hour=0,
-            current_day=267,
-            current_hour=0,
-        )
-        assert result == 24
 
 
 class TestGetCurrentIngameTime:
     """Tests for get_current_ingame_time function."""
 
     def test_returns_none_when_war_not_configured(self) -> None:
-        """
-        Test returns None when war state is not configured.
-
-        """
+        """Test returns None when war state is not configured."""
         result = get_current_ingame_time()
         assert result is None
 
     def test_returns_time_when_configured(self) -> None:
-        """
-        Test returns time when war state is configured.
-
-        """
+        """Test returns time when war state is configured."""
         war_service = get_war_service()
         # Set start time to 2.5 hours ago
         war_service.initialize(start_time=int((time.time() - 2.5 * 60 * 60) * 1000))
@@ -365,8 +196,7 @@ class TestVerificationServiceInit:
     """Tests for VerificationService initialization."""
 
     def test_init_with_settings(self, mock_settings: AppSettings) -> None:
-        """
-        Test service initialization with settings.
+        """Test service initialization with settings.
 
         Args:
             mock_settings (AppSettings): Mock settings fixture.
@@ -376,10 +206,7 @@ class TestVerificationServiceInit:
         assert service.settings is mock_settings
 
     def test_init_sets_tesseract_cmd_when_provided(self) -> None:
-        """
-        Test that tesseract_cmd is set when provided in settings.
-
-        """
+        """Test that tesseract_cmd is set when provided in settings."""
         settings = AppSettings()
         settings.ocr.tesseract_cmd = "/custom/tesseract"
 
@@ -391,8 +218,7 @@ class TestVerificationServiceInit:
         self,
         mock_settings: AppSettings,
     ) -> None:
-        """
-        Test that tesseract_cmd is not set when None.
+        """Test that tesseract_cmd is not set when None.
 
         Args:
             mock_settings (AppSettings): Mock settings fixture.
@@ -408,8 +234,7 @@ class TestVerificationServiceInit:
         self,
         mock_settings: AppSettings,
     ) -> None:
-        """
-        Test that colonial icon is loaded when path is provided.
+        """Test that colonial icon is loaded when path is provided.
 
         Args:
             mock_settings (AppSettings): Mock settings fixture.
@@ -434,8 +259,7 @@ class TestVerificationServiceInit:
         self,
         mock_settings: AppSettings,
     ) -> None:
-        """
-        Test that warden icon is loaded when path is provided.
+        """Test that warden icon is loaded when path is provided.
 
         Args:
             mock_settings (AppSettings): Mock settings fixture.
@@ -460,8 +284,7 @@ class TestVerificationServiceInit:
         self,
         mock_settings: AppSettings,
     ) -> None:
-        """
-        Test that a warning is logged when colonial icon file is not found.
+        """Test that a warning is logged when colonial icon file is not found.
 
         Args:
             mock_settings (AppSettings): Mock settings fixture.
@@ -486,8 +309,7 @@ class TestVerificationServiceInit:
         self,
         mock_settings: AppSettings,
     ) -> None:
-        """
-        Test that a warning is logged when warden icon file is not found.
+        """Test that a warning is logged when warden icon file is not found.
 
         Args:
             mock_settings (AppSettings): Mock settings fixture.
@@ -512,8 +334,7 @@ class TestVerificationServiceInit:
         self,
         mock_settings: AppSettings,
     ) -> None:
-        """
-        Test that colonial icon is None when no path is provided.
+        """Test that colonial icon is None when no path is provided.
 
         Args:
             mock_settings (AppSettings): Mock settings fixture.
@@ -527,8 +348,7 @@ class TestVerificationServiceInit:
         self,
         mock_settings: AppSettings,
     ) -> None:
-        """
-        Test that debug directory is created when debug mode is enabled.
+        """Test that debug directory is created when debug mode is enabled.
 
         Args:
             mock_settings (AppSettings): Mock settings fixture.
@@ -549,8 +369,7 @@ class TestVerificationServiceExtractText:
         self,
         mock_settings: AppSettings,
     ) -> None:
-        """
-        Test that empty string is returned for None image.
+        """Test that empty string is returned for None image.
 
         Args:
             mock_settings (AppSettings): Mock settings fixture.
@@ -564,8 +383,7 @@ class TestVerificationServiceExtractText:
         self,
         mock_settings: AppSettings,
     ) -> None:
-        """
-        Test that empty string is returned for empty image.
+        """Test that empty string is returned for empty image.
 
         Args:
             mock_settings (AppSettings): Mock settings fixture.
@@ -581,8 +399,7 @@ class TestVerificationServiceExtractText:
         mock_settings: AppSettings,
         sample_image_bytes: bytes,
     ) -> None:
-        """
-        Test text extraction from valid image.
+        """Test text extraction from valid image.
 
         Args:
             mock_settings (AppSettings): Mock settings fixture.
@@ -606,8 +423,7 @@ class TestVerificationServiceExtractText:
         mock_settings: AppSettings,
         sample_image_bytes: bytes,
     ) -> None:
-        """
-        Test text extraction with scaling enabled.
+        """Test text extraction with scaling enabled.
 
         Args:
             mock_settings (AppSettings): Mock settings fixture.
@@ -631,8 +447,7 @@ class TestVerificationServiceExtractText:
         mock_settings: AppSettings,
         sample_image_bytes: bytes,
     ) -> None:
-        """
-        Test text extraction without color inversion.
+        """Test text extraction without color inversion.
 
         Args:
             mock_settings (AppSettings): Mock settings fixture.
@@ -653,83 +468,13 @@ class TestVerificationServiceExtractText:
 
 
 class TestVerificationServiceDetectFaction:
-    """Tests for _detect_faction method."""
-
-    def test_detect_faction_returns_none_when_no_templates(
-        self,
-        mock_settings: AppSettings,
-        sample_image_bytes: bytes,
-    ) -> None:
-        """
-        Test that None is returned when no faction icon templates are loaded.
-
-        Args:
-            mock_settings (AppSettings): Mock settings fixture.
-            sample_image_bytes (bytes): Sample image bytes fixture.
-
-        """
-        nparr = np.frombuffer(buffer=sample_image_bytes, dtype=np.uint8)
-        img = cv2.imdecode(buf=nparr, flags=cv2.IMREAD_COLOR)
-        assert img is not None
-
-        service = VerificationService(mock_settings)
-        result = service._detect_faction(image=img, threshold=0.7)
-        assert result is None
-
-    def test_detect_faction_returns_colonial_when_colonial_matches(
-        self,
-        mock_settings: AppSettings,
-        sample_image_bytes: bytes,
-    ) -> None:
-        """
-        Test that COLONIAL is returned when colonial icon matches above threshold.
-
-        Args:
-            mock_settings (AppSettings): Mock settings fixture.
-            sample_image_bytes (bytes): Sample image bytes fixture.
-
-        """
-        nparr = np.frombuffer(buffer=sample_image_bytes, dtype=np.uint8)
-        img = cv2.imdecode(buf=nparr, flags=cv2.IMREAD_COLOR)
-        assert img is not None
-
-        service = VerificationService(mock_settings)
-        # Set a mock colonial icon that will match
-        service.colonial_icon = img.copy()
-
-        result = service._detect_faction(image=img, threshold=0.7)
-        assert result == Faction.COLONIAL
-
-    def test_detect_faction_returns_wardens_when_wardens_matches(
-        self,
-        mock_settings: AppSettings,
-        sample_image_bytes: bytes,
-    ) -> None:
-        """
-        Test that WARDEN is returned when warden icon matches above threshold.
-
-        Args:
-            mock_settings (AppSettings): Mock settings fixture.
-            sample_image_bytes (bytes): Sample image bytes fixture.
-
-        """
-        nparr = np.frombuffer(buffer=sample_image_bytes, dtype=np.uint8)
-        img = cv2.imdecode(buf=nparr, flags=cv2.IMREAD_COLOR)
-        assert img is not None
-
-        service = VerificationService(mock_settings)
-        # Set a mock wardens icon that will match
-        service.warden_icon = img.copy()
-
-        result = service._detect_faction(image=img, threshold=0.7)
-        assert result == Faction.WARDEN
+    """Tests for faction detection."""
 
     def test_find_user_info_sets_faction_colonial(
         self,
         mock_settings: AppSettings,
     ) -> None:
-        """
-        Test that faction is set to COLONIAL when colonial icon is found.
+        """Test that faction is set to COLONIAL when colonial icon is found.
 
         Args:
             mock_settings (AppSettings): Mock settings fixture.
@@ -753,8 +498,7 @@ class TestVerificationServiceCalculateRegions:
         self,
         mock_settings: AppSettings,
     ) -> None:
-        """
-        Test that _calculate_regions returns ImageRegions with all expected attributes.
+        """Test that _calculate_regions returns ImageRegions with all expected attributes.
 
         Args:
             mock_settings (AppSettings): Mock settings fixture.
@@ -774,8 +518,7 @@ class TestVerificationServiceCalculateRegions:
         self,
         mock_settings: AppSettings,
     ) -> None:
-        """
-        Test that scale factor is 1.0 for 4K resolution.
+        """Test that scale factor is 1.0 for 4K resolution.
 
         Args:
             mock_settings (AppSettings): Mock settings fixture.
@@ -790,8 +533,7 @@ class TestVerificationServiceCalculateRegions:
         self,
         mock_settings: AppSettings,
     ) -> None:
-        """
-        Test that scale factor is 0.5 for 1080p resolution.
+        """Test that scale factor is 0.5 for 1080p resolution.
 
         Args:
             mock_settings (AppSettings): Mock settings fixture.
@@ -811,8 +553,7 @@ class TestVerificationServiceSaveDebugImage:
         mock_settings: AppSettings,
         tmp_path: pathlib.Path,
     ) -> None:
-        """
-        Test that debug image is saved to file.
+        """Test that debug image is saved to file.
 
         Args:
             mock_settings (AppSettings): Mock settings fixture.
@@ -839,8 +580,7 @@ class TestVerificationServiceSaveDebugImage:
         mock_settings: AppSettings,
         tmp_path: pathlib.Path,
     ) -> None:
-        """
-        Test that invalid filenames are rejected.
+        """Test that invalid filenames are rejected.
 
         Args:
             mock_settings (AppSettings): Mock settings fixture.
@@ -869,8 +609,7 @@ class TestVerificationServiceSaveDebugImage:
         mock_settings: AppSettings,
         tmp_path: pathlib.Path,
     ) -> None:
-        """
-        Test that path components are stripped from filename.
+        """Test that path components are stripped from filename.
 
         Args:
             mock_settings (AppSettings): Mock settings fixture.
@@ -901,8 +640,7 @@ class TestVerificationServiceSaveDebugImage:
         mock_settings: AppSettings,
         tmp_path: pathlib.Path,
     ) -> None:
-        """
-        Test that symlink-based path traversal is rejected.
+        """Test that symlink-based path traversal is rejected.
 
         Args:
             mock_settings (AppSettings): Mock settings fixture.
@@ -951,8 +689,7 @@ class TestVerificationServicePrepareImageForShardDetection:
         self,
         mock_settings: AppSettings,
     ) -> None:
-        """
-        Test that None is returned when image is None.
+        """Test that None is returned when image is None.
 
         Args:
             mock_settings (AppSettings): Mock settings fixture.
@@ -966,8 +703,7 @@ class TestVerificationServicePrepareImageForShardDetection:
         self,
         mock_settings: AppSettings,
     ) -> None:
-        """
-        Test that empty image is returned unchanged.
+        """Test that empty image is returned unchanged.
 
         Args:
             mock_settings (AppSettings): Mock settings fixture.
@@ -982,8 +718,7 @@ class TestVerificationServicePrepareImageForShardDetection:
         self,
         mock_settings: AppSettings,
     ) -> None:
-        """
-        Test that valid image is processed correctly.
+        """Test that valid image is processed correctly.
 
         Args:
             mock_settings (AppSettings): Mock settings fixture.
@@ -1003,8 +738,7 @@ class TestVerificationServiceGetShardAndTime:
         self,
         mock_settings: AppSettings,
     ) -> None:
-        """
-        Test that None is returned when shard region is empty.
+        """Test that None is returned when shard region is empty.
 
         Args:
             mock_settings (AppSettings): Mock settings fixture.
@@ -1032,8 +766,7 @@ class TestVerificationServiceGetShardAndTime:
         self,
         mock_settings: AppSettings,
     ) -> None:
-        """
-        Test that shard and time are extracted.
+        """Test that shard and time are extracted.
 
         Args:
             mock_settings (AppSettings): Mock settings fixture.
@@ -1055,8 +788,7 @@ class TestVerificationServiceGetShardAndTime:
         self,
         mock_settings: AppSettings,
     ) -> None:
-        """
-        Test that None is returned when no text extracted.
+        """Test that None is returned when no text extracted.
 
         Args:
             mock_settings (AppSettings): Mock settings fixture.
@@ -1078,8 +810,7 @@ class TestVerificationServiceGetShardAndTime:
         self,
         mock_settings: AppSettings,
     ) -> None:
-        """
-        Test handling of single line OCR output.
+        """Test handling of single line OCR output.
 
         Args:
             mock_settings (AppSettings): Mock settings fixture.
@@ -1106,8 +837,7 @@ class TestVerificationServiceVerify:
         mock_settings: AppSettings,
         invalid_image_bytes: bytes,
     ) -> None:
-        """
-        Test that ValueError is raised for invalid images.
+        """Test that ValueError is raised for invalid images.
 
         Args:
             mock_settings (AppSettings): Mock settings fixture.
@@ -1122,8 +852,7 @@ class TestVerificationServiceVerify:
         self,
         mock_settings: AppSettings,
     ) -> None:
-        """
-        Test that ValueError is raised when no profile box is found in either image.
+        """Test that ValueError is raised when no profile box is found in either image.
 
         Args:
             mock_settings (AppSettings): Mock settings fixture.
@@ -1142,8 +871,7 @@ class TestVerificationServiceVerify:
         self,
         mock_settings: AppSettings,
     ) -> None:
-        """
-        Test that ValueError is raised when both images appear to be profile images.
+        """Test that ValueError is raised when both images appear to be profile images.
 
         Args:
             mock_settings (AppSettings): Mock settings fixture.
@@ -1171,8 +899,7 @@ class TestVerificationServiceVerify:
         self,
         mock_settings: AppSettings,
     ) -> None:
-        """
-        Test that ValueError is raised when no name is found in the profile image.
+        """Test that ValueError is raised when no name is found in the profile image.
 
         Args:
             mock_settings (AppSettings): Mock settings fixture.
@@ -1211,8 +938,7 @@ class TestVerificationServiceVerify:
         self,
         mock_settings: AppSettings,
     ) -> None:
-        """
-        Test that verify extracts user information correctly.
+        """Test that verify extracts user information correctly.
 
         Args:
             mock_settings (AppSettings): Mock settings fixture.
@@ -1268,8 +994,7 @@ class TestVerificationServiceVerify:
         self,
         mock_settings: AppSettings,
     ) -> None:
-        """
-        Test that verify handles malformed OCR text gracefully.
+        """Test that verify handles malformed OCR text gracefully.
 
         Tests when level region has no colon - level stays None.
 
@@ -1319,8 +1044,7 @@ class TestVerificationServiceVerify:
         self,
         mock_settings: AppSettings,
     ) -> None:
-        """
-        Test that level is None when colon exists but no digits after it.
+        """Test that level is None when colon exists but no digits after it.
 
         Covers branch 603->609 where digits is empty string.
 
@@ -1370,8 +1094,7 @@ class TestVerificationServiceVerify:
         self,
         mock_settings: AppSettings,
     ) -> None:
-        """
-        Test that verify logs an info message.
+        """Test that verify logs an info message.
 
         Args:
             mock_settings (AppSettings): Mock settings fixture.
@@ -1399,8 +1122,7 @@ class TestVerificationServiceVerify:
         self,
         mock_settings: AppSettings,
     ) -> None:
-        """
-        Test that user info is extracted from the image with faction icon.
+        """Test that user info is extracted from the image with faction icon.
 
         When second image has faction, user info comes from second image
         and shard info comes from first image.
@@ -1454,8 +1176,7 @@ class TestVerificationServiceVerify:
         mock_settings: AppSettings,
         tmp_path: pathlib.Path,
     ) -> None:
-        """
-        Test that debug images are saved when debug mode is enabled.
+        """Test that debug images are saved when debug mode is enabled.
 
         Args:
             mock_settings (AppSettings): Mock settings fixture.
@@ -1510,8 +1231,7 @@ class TestVerificationServiceVerify:
         self,
         mock_settings: AppSettings,
     ) -> None:
-        """
-        Test that verify includes shard and ingame_time in result.
+        """Test that verify includes shard and ingame_time in result.
 
         Args:
             mock_settings (AppSettings): Mock settings fixture.
@@ -1559,8 +1279,7 @@ class TestVerificationServiceVerify:
         self,
         mock_settings: AppSettings,
     ) -> None:
-        """
-        Test that verify includes war_number and current_ingame_time in result.
+        """Test that verify includes war_number and current_ingame_time in result.
 
         Args:
             mock_settings (AppSettings): Mock settings fixture.
@@ -1615,8 +1334,7 @@ class TestVerificationServiceVerify:
         self,
         mock_settings: AppSettings,
     ) -> None:
-        """
-        Test that error is raised when no shard info is found.
+        """Test that error is raised when no shard info is found.
 
         Args:
             mock_settings (AppSettings): Mock settings fixture.
@@ -1665,8 +1383,7 @@ class TestVerificationServiceVerify:
         self,
         mock_settings: AppSettings,
     ) -> None:
-        """
-        Test that verify returns result when war state not configured.
+        """Test that verify returns result when war state not configured.
 
         Args:
             mock_settings (AppSettings): Mock settings fixture.
@@ -1723,8 +1440,7 @@ class TestVerificationServiceIntegration:
         colonial_image_bytes: bytes,
         stockpile_image_bytes: bytes,
     ) -> None:
-        """
-        Test verification with real colonial game screenshots.
+        """Test verification with real colonial game screenshots.
 
         Args:
             integration_settings (AppSettings): Integration settings with real icons.
@@ -1745,8 +1461,7 @@ class TestVerificationServiceIntegration:
         warden_image_bytes: bytes,
         stockpile_image_bytes: bytes,
     ) -> None:
-        """
-        Test verification with real warden game screenshots.
+        """Test verification with real warden game screenshots.
 
         Args:
             integration_settings (AppSettings): Integration settings with real icons.
@@ -1769,8 +1484,7 @@ class TestVerificationServiceIntegration:
         colonial_image_bytes: bytes,
         stockpile_image_bytes: bytes,
     ) -> None:
-        """
-        Test shard extraction from real stockpile screenshot.
+        """Test shard extraction from real stockpile screenshot.
 
         Args:
             integration_settings (AppSettings): Integration settings with real icons.
@@ -1790,8 +1504,7 @@ class TestVerificationServiceIntegration:
         colonial_image_bytes: bytes,
         stockpile_image_bytes: bytes,
     ) -> None:
-        """
-        Test regiment name extraction from colonial user screenshot.
+        """Test regiment name extraction from colonial user screenshot.
 
         Args:
             integration_settings (AppSettings): Integration settings with real icons.
@@ -1813,8 +1526,7 @@ class TestVerificationServiceIntegration:
         warden_image_bytes: bytes,
         stockpile_image_bytes: bytes,
     ) -> None:
-        """
-        Test that warden user without regiment has None for regiment.
+        """Test that warden user without regiment has None for regiment.
 
         Args:
             integration_settings (AppSettings): Integration settings with real icons.
@@ -1832,8 +1544,7 @@ class TestVerificationServiceIntegration:
         self,
         mock_settings: AppSettings,
     ) -> None:
-        """
-        Test that ValueError is raised when image is too small.
+        """Test that ValueError is raised when image is too small.
 
         Args:
             mock_settings (AppSettings): Mock settings fixture.
@@ -1863,8 +1574,7 @@ class TestVerificationServiceIntegration:
         self,
         mock_settings: AppSettings,
     ) -> None:
-        """
-        Test that OpenCV errors are handled gracefully.
+        """Test that OpenCV errors are handled gracefully.
 
         Args:
             mock_settings (AppSettings): Mock settings fixture.
@@ -1885,8 +1595,7 @@ class TestVerificationServiceIntegration:
         self,
         integration_settings: AppSettings,
     ) -> None:
-        """
-        Test that Tesseract errors are handled gracefully.
+        """Test that Tesseract errors are handled gracefully.
 
         Args:
             integration_settings (AppSettings): Integration settings fixture.
@@ -1919,8 +1628,7 @@ class TestVerificationServiceIntegration:
         self,
         mock_settings: AppSettings,
     ) -> None:
-        """
-        Test that unexpected exceptions are handled gracefully.
+        """Test that unexpected exceptions are handled gracefully.
 
         Args:
             mock_settings (AppSettings): Mock settings fixture.
@@ -1952,8 +1660,7 @@ class TestFindProfileBoxByBlack:
     """Tests for _find_profile_box_by_black method edge cases."""
 
     def test_rejects_box_at_origin(self, mock_settings: AppSettings) -> None:
-        """
-        Test that boxes at origin (0, 0) are rejected.
+        """Test that boxes at origin (0, 0) are rejected.
 
         Args:
             mock_settings: Mock settings fixture.
@@ -1970,8 +1677,7 @@ class TestFindProfileBoxByBlack:
         assert result is None
 
     def test_rejects_box_too_wide(self, mock_settings: AppSettings) -> None:
-        """
-        Test that boxes wider than 50% of image width are rejected.
+        """Test that boxes wider than 50% of image width are rejected.
 
         Args:
             mock_settings: Mock settings fixture.
@@ -1996,8 +1702,7 @@ class TestFindGreyBoxesPattern:
         self,
         mock_settings: AppSettings,
     ) -> None:
-        """
-        Test that None is returned when fewer than 6 grey box candidates.
+        """Test that None is returned when fewer than 6 grey box candidates.
 
         Args:
             mock_settings: Mock settings fixture.
@@ -2015,8 +1720,7 @@ class TestFindGreyBoxesPattern:
         assert result is None
 
     def test_finds_valid_4_plus_2_pattern(self, mock_settings: AppSettings) -> None:
-        """
-        Test successful detection of 4+2 grey box pattern.
+        """Test successful detection of 4+2 grey box pattern.
 
         Args:
             mock_settings: Mock settings fixture.
@@ -2043,8 +1747,7 @@ class TestFindGreyBoxesPattern:
         assert len(grey_boxes) == 4  # Row 1 boxes sorted by x
 
     def test_returns_none_when_no_row2_found(self, mock_settings: AppSettings) -> None:
-        """
-        Test that None is returned when row 2 (2 boxes) is not found below row 1.
+        """Test that None is returned when row 2 (2 boxes) is not found below row 1.
 
         Args:
             mock_settings: Mock settings fixture.
@@ -2073,8 +1776,7 @@ class TestFindRow2Below:
     """Tests for _find_row2_below method."""
 
     def test_returns_none_when_row2_too_far(self, mock_settings: AppSettings) -> None:
-        """
-        Test that None is returned when row 2 is too far below row 1.
+        """Test that None is returned when row 2 is too far below row 1.
 
         Args:
             mock_settings: Mock settings fixture.
@@ -2102,8 +1804,7 @@ class TestFindRow2Below:
         assert result is None
 
     def test_finds_row2_within_tolerance(self, mock_settings: AppSettings) -> None:
-        """
-        Test that row 2 is found when within distance tolerance.
+        """Test that row 2 is found when within distance tolerance.
 
         Args:
             mock_settings: Mock settings fixture.
@@ -2135,8 +1836,7 @@ class TestCalculateProfileBoxFromRows:
     """Tests for _calculate_profile_box_from_rows method."""
 
     def test_calculates_profile_box_bounds(self, mock_settings: AppSettings) -> None:
-        """
-        Test that profile box is correctly calculated from row boxes.
+        """Test that profile box is correctly calculated from row boxes.
 
         Args:
             mock_settings: Mock settings fixture.
@@ -2174,8 +1874,7 @@ class TestDetectFactionWithScaledTemplate:
         self,
         mock_settings: AppSettings,
     ) -> None:
-        """
-        Test that None is returned when icon region is empty.
+        """Test that None is returned when icon region is empty.
 
         Args:
             mock_settings: Mock settings fixture.
@@ -2197,8 +1896,7 @@ class TestDetectFactionWithScaledTemplate:
         self,
         mock_settings: AppSettings,
     ) -> None:
-        """
-        Test that templates larger than icon region are skipped.
+        """Test that templates larger than icon region are skipped.
 
         When the icon_region extends beyond image bounds, the sliced icon_img
         will be smaller than expected, causing scaled template to not fit.
@@ -2237,8 +1935,7 @@ class TestFindShardDynamic:
         self,
         mock_settings: AppSettings,
     ) -> None:
-        """
-        Test extraction of shard name from line after time pattern.
+        """Test extraction of shard name from line after time pattern.
 
         Args:
             mock_settings: Mock settings fixture.
@@ -2261,8 +1958,7 @@ class TestFindShardDynamic:
         self,
         mock_settings: AppSettings,
     ) -> None:
-        """
-        Test that (None, None) is returned when no time pattern found.
+        """Test that (None, None) is returned when no time pattern found.
 
         Args:
             mock_settings: Mock settings fixture.
@@ -2283,8 +1979,7 @@ class TestFindShardDynamic:
         self,
         mock_settings: AppSettings,
     ) -> None:
-        """
-        Test that shard is None when time pattern is on last line.
+        """Test that shard is None when time pattern is on last line.
 
         Args:
             mock_settings: Mock settings fixture.
@@ -2311,8 +2006,7 @@ class TestFindProfileBoxGreyBoxFallback:
         self,
         mock_settings: AppSettings,
     ) -> None:
-        """
-        Test that grey box pattern is used when black box detection fails.
+        """Test that grey box pattern is used when black box detection fails.
 
         Args:
             mock_settings: Mock settings fixture.
@@ -2356,8 +2050,7 @@ class TestExtractProfileDataGreyBoxesNone:
         self,
         mock_settings: AppSettings,
     ) -> None:
-        """
-        Test that grey boxes are calculated from black box when None.
+        """Test that grey boxes are calculated from black box when None.
 
         Args:
             mock_settings: Mock settings fixture.
@@ -2390,8 +2083,7 @@ class TestGetShardAndTimeDebugMode:
         mock_settings: AppSettings,
         tmp_path: pathlib.Path,
     ) -> None:
-        """
-        Test that processed shard image is saved in debug mode.
+        """Test that processed shard image is saved in debug mode.
 
         Args:
             mock_settings: Mock settings fixture.

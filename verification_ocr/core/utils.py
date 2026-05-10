@@ -1,6 +1,7 @@
 """Core utilities."""
 
 import logging
+import re
 import shutil
 import subprocess
 import sys
@@ -35,6 +36,30 @@ def calculate_war_time(start_time: int) -> tuple[int, int, int]:
     war_minute = int((fraction * 24 % 1) * 60)
 
     return war_day, war_hour, war_minute
+
+
+def extract_day_and_hour(text: str) -> str:
+    """Extract days and hours from a formatted string.
+
+    Args:
+        text (str): Input text containing numbers and commas.
+
+    Returns:
+        str: Formatted string with days and hours, e.g. "1234, 15:30".
+    """
+    # Find all digit/comma groups and join
+    result = "".join(re.findall(pattern=r"[\d,]+", string=text))
+    # Remove first comma if exactly two commas
+    if result.count(",") == 2:
+        result = result.replace(",", "", 1)
+    # Try to split into left/right by first comma
+    parts = result.split(",", 1)
+    if len(parts) == 2:
+        left, right = parts
+        digits = re.sub(pattern=r"\D", repl="", string=right)
+        if len(digits) == 4:
+            return f"{left}, {digits[:2]}:{digits[2:]}"
+    return result
 
 
 # Handler names used to identify handlers and avoid duplicates
