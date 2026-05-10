@@ -57,8 +57,37 @@ def detect_profile_boxes(image: MatLike) -> list[Box] | None:
         or None if not found.
     """
     gray = cv2.cvtColor(src=image, code=cv2.COLOR_BGR2GRAY)
-    grey_min, grey_max = _get_grey_range(gray)
 
+    # Get detected range first, then try others
+    detected_range = _get_grey_range(gray)
+    all_ranges = [r[1] for r in PROFILE_GREY_RANGES]
+
+    # Reorder: detected range first, then others
+    ranges_to_try = [detected_range] + [r for r in all_ranges if r != detected_range]
+
+    for grey_min, grey_max in ranges_to_try:
+        result = _try_detect_with_range(gray, grey_min, grey_max)
+        if result is not None:
+            return result
+
+    return None
+
+
+def _try_detect_with_range(
+    gray: MatLike,
+    grey_min: int,
+    grey_max: int,
+) -> list[Box] | None:
+    """Try to detect profile boxes using a specific grey range.
+
+    Args:
+        gray: Grayscale image.
+        grey_min: Minimum grey value.
+        grey_max: Maximum grey value.
+
+    Returns:
+        List of 4 boxes or None if not found.
+    """
     # Convert pixels below grey range to white to fill text holes in grey boxes
     mask_dark = cv2.inRange(
         src=gray,
