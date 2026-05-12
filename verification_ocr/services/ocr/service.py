@@ -19,7 +19,7 @@ from verification_ocr.services.ocr.profile import (
     Box,
     detect_profile_boxes,
 )
-from verification_ocr.services.ocr.shard import detect_shard_box
+from verification_ocr.services.ocr.shard import detect_shard_region
 from verification_ocr.services.war_service import get_war_service
 
 # Minimum template match confidence for faction detection
@@ -138,18 +138,6 @@ class OCRService:
         """
         return detect_profile_boxes(image)
 
-    def detect_shard_box(self, image: MatLike, profile_height: int) -> Box | None:
-        """Detect shard box in an image.
-
-        Args:
-            image: BGR image to analyze.
-            profile_height: Height of a profile box (for scaling).
-
-        Returns:
-            Box (x, y, w, h) for the shard, or None if not found.
-        """
-        return detect_shard_box(image, profile_height)
-
     def _crop_box(self, image: MatLike, box: Box) -> MatLike:
         """Crop a region from an image.
 
@@ -238,48 +226,75 @@ class OCRService:
 
         return text if text else None
 
-    def _extract_shard_data(self, image: MatLike, box: Box) -> ShardData:
-        """Extract shard data from shard box (multiline text).
+    def _extract_shard_data(self, image: MatLike, profile_height: int) -> ShardData:
+        """Extract shard data from the bottom-left shard region.
 
-        Expected format (3+ lines):
-            Line 1: Location name (ignored)
-            Line 2: "Day NNN, HHMM Hours" -> extract day and time (language-agnostic)
-            Line 3: Shard name (e.g., "Able", "Baker", "Charlie")
+        Crops the bottom-left region where the shard box is located,
+        then extracts text using OCR. The shard box contains 5 lines:
+            Line 1: Region name (e.g., "Colonial Home Region")
+            Line 2: Day and time (e.g., "Day 315, 1732 Hours") <- extracted
+            Line 3: Shard name (e.g., "ABLE") <- extracted
+            Line 4: Empty
+            Line 5: Status message
 
         Args:
             image: BGR image containing the shard box.
-            box: Shard box coordinates (x, y, w, h).
+            profile_height: Height of a profile box (for scaling).
 
         Returns:
             Dictionary with keys: shard, ingame_time.
         """
-        crop = self._crop_box(image=image, box=box)
-        preprocessed = self._preprocess_for_ocr(crop)
+        # Detect and crop the bottom-left region
+        shard_box = detect_shard_region(image=image, profile_height=profile_height)
+        if shard_box is None:
+            return ShardData(shard=None, ingame_time=None)
 
-        # Use PSM 6 for multiline text block
-        text = pytesseract.image_to_string(
-            image=preprocessed,
-            config="--psm 6",
+        cropped = self._crop_box(image=image, box=shard_box)
+
+        # Preprocess: bilateral filter + adaptive threshold
+        filtered = cv2.bilateralFilter(src=cropped, d=9, sigmaColor=75, sigmaSpace=75)
+        gray = cv2.cvtColor(src=filtered, code=cv2.COLOR_BGR2GRAY)
+        processed = cv2.adaptiveThreshold(
+            src=gray,
+            maxValue=255,
+            adaptiveMethod=cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+            thresholdType=cv2.THRESH_BINARY,
+            blockSize=51,
+            C=5,
         )
 
+        # Extract text using multiline mode
+        text: str = pytesseract.image_to_string(image=processed, config="--psm 6")
+
+        # Parse lines and extract data
         lines = [line.strip() for line in text.strip().split("\n") if line.strip()]
 
-        shard: str | None = None
         ingame_time: str | None = None
+        shard: str | None = None
 
-        # Find the line with time pattern (digits + comma + 4 digits)
-        # Shard name is on the next line
-        for i, line in enumerate(lines):
-            # Look for pattern: digits + comma + 4 digits (e.g., "154, 2335")
-            if re.search(r"\d{1,4}\s*,\s*\d{4}", line):
-                # Use language-agnostic extraction
-                found_time = extract_day_and_hour(line)
-                if found_time and "," in found_time and ":" in found_time:
-                    ingame_time = found_time
-                    # Shard is on the next line
-                    if i + 1 < len(lines):
-                        shard = lines[i + 1].upper().strip()
-                    break
+        # Known shard names
+        shard_names = {"ABLE", "CHARLIE"}
+
+        # Search all lines for the patterns (handles OCR noise/line shifts)
+        for line in lines:
+            # Look for time pattern: digits, comma, 4 digits
+            if ingame_time is None:
+                match = re.search(r"(\d{1,4})\s*,\s*(\d{4})", line)
+                if match:
+                    time_str = f"{match.group(1)}, {match.group(2)}"
+                    ingame_time = extract_day_and_hour(time_str)
+
+            # Look for shard name
+            if shard is None:
+                line_upper = line.upper()
+                for name in shard_names:
+                    if name in line_upper:
+                        shard = name
+                        break
+
+            # Stop early if both found
+            if ingame_time and shard:
+                break
 
         return ShardData(
             shard=shard,
@@ -418,13 +433,8 @@ class OCRService:
         if profile_boxes is None:
             raise ValueError("Could not detect profile boxes in either image")
 
-        # Get profile height for shard detection scaling
+        # Get profile height for shard region scaling
         profile_height = profile_boxes[0][3]
-
-        # Detect shard box in the other image
-        shard_box = self.detect_shard_box(shard_image, profile_height)
-        if shard_box is None:
-            raise ValueError("Could not detect shard box")
 
         # Extract profile data
         profile_data = self.extract_profile_data(
@@ -435,7 +445,7 @@ class OCRService:
         # Extract shard data
         shard_data = self._extract_shard_data(
             image=shard_image,
-            box=shard_box,
+            profile_height=profile_height,
         )
 
         # Get war info

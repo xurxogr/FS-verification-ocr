@@ -26,7 +26,6 @@ from verification_ocr.services import get_war_service
 
 # Type alias for profile boxes result
 type ProfileBoxes = list[tuple[int, int, int, int]]
-type ShardBox = tuple[int, int, int, int]
 
 
 class TestLifespan:
@@ -359,10 +358,6 @@ class TestVerifyEndpoint:
             (430, 200, 100, 50),  # regiment
         ]
 
-    def _create_mock_shard_box(self) -> ShardBox:
-        """Create mock shard box for testing."""
-        return (50, 900, 340, 92)
-
     def test_verify_with_valid_images(self, test_client: TestClient) -> None:
         """Test verify endpoint with valid images."""
         profile_bytes = self._create_test_image()
@@ -397,25 +392,21 @@ class TestVerifyEndpoint:
                 side_effect=mock_detect_profile,
             ):
                 with patch(
-                    "verification_ocr.services.ocr.service.detect_shard_box",
-                    return_value=self._create_mock_shard_box(),
+                    "verification_ocr.services.ocr.service.OCRService._detect_faction",
+                    return_value=Faction.COLONIAL,
                 ):
-                    with patch(
-                        "verification_ocr.services.ocr.service.OCRService._detect_faction",
-                        return_value=Faction.COLONIAL,
-                    ):
-                        response = test_client.post(
-                            "/foxhole/verify",
-                            files={
-                                "image1": ("test1.png", io.BytesIO(profile_bytes), "image/png"),
-                                "image2": ("test2.png", io.BytesIO(shard_bytes), "image/png"),
-                            },
-                        )
+                    response = test_client.post(
+                        "/foxhole/verify",
+                        files={
+                            "image1": ("test1.png", io.BytesIO(profile_bytes), "image/png"),
+                            "image2": ("test2.png", io.BytesIO(shard_bytes), "image/png"),
+                        },
+                    )
 
-                        assert response.status_code == 200
-                        data = response.json()
-                        assert data["name"] == "TestUser"
-                        assert data["level"] == 15
+                    assert response.status_code == 200
+                    data = response.json()
+                    assert data["name"] == "TestUser"
+                    assert data["level"] == 15
 
     def test_verify_missing_image1(self, test_client: TestClient) -> None:
         """Test verify endpoint with missing image1."""
@@ -660,10 +651,6 @@ class TestApiKeyAuthentication:
             (430, 200, 100, 50),  # regiment
         ]
 
-    def _create_mock_shard_box(self) -> ShardBox:
-        """Create mock shard box for testing."""
-        return (50, 900, 340, 92)
-
     def test_verify_api_key_disabled(self, test_client: TestClient) -> None:
         """Test that API key is not required when disabled."""
         settings = get_settings()
@@ -764,22 +751,18 @@ class TestApiKeyAuthentication:
                     side_effect=mock_detect_profile,
                 ):
                     with patch(
-                        "verification_ocr.services.ocr.service.detect_shard_box",
-                        return_value=self._create_mock_shard_box(),
+                        "verification_ocr.services.ocr.service.OCRService._detect_faction",
+                        return_value=Faction.COLONIAL,
                     ):
-                        with patch(
-                            "verification_ocr.services.ocr.service.OCRService._detect_faction",
-                            return_value=Faction.COLONIAL,
-                        ):
-                            response = test_client.post(
-                                "/foxhole/verify",
-                                files={
-                                    "image1": ("test1.png", io.BytesIO(profile_bytes), "image/png"),
-                                    "image2": ("test2.png", io.BytesIO(shard_bytes), "image/png"),
-                                },
-                                headers={"X-API-Key": "test-secret-key"},
-                            )
-                            assert response.status_code == 200
+                        response = test_client.post(
+                            "/foxhole/verify",
+                            files={
+                                "image1": ("test1.png", io.BytesIO(profile_bytes), "image/png"),
+                                "image2": ("test2.png", io.BytesIO(shard_bytes), "image/png"),
+                            },
+                            headers={"X-API-Key": "test-secret-key"},
+                        )
+                        assert response.status_code == 200
 
 
 class TestFrontendServing:

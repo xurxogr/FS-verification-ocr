@@ -122,18 +122,6 @@ class TestDetectProfileBoxes:
         assert result is None
 
 
-class TestDetectShardBox:
-    """Tests for detect_shard_box method."""
-
-    def test_returns_none_for_blank_image(self) -> None:
-        """Test that blank images return None."""
-        settings = get_settings()
-        service = OCRService(settings)
-        blank = np.ones((1080, 1920, 3), dtype=np.uint8) * 255
-        result = service.detect_shard_box(blank, profile_height=35)
-        assert result is None
-
-
 class TestCropBox:
     """Tests for _crop_box method."""
 
@@ -329,14 +317,14 @@ class TestExtractShardData:
         """Test shard data extraction."""
         settings = get_settings()
         service = OCRService(settings)
-        img = np.ones((200, 400, 3), dtype=np.uint8) * 255
-        box: Box = (0, 0, 400, 200)
+        # Image size must be large enough for shard region detection
+        img = np.ones((1080, 1920, 3), dtype=np.uint8) * 255
 
         with patch(
             "verification_ocr.services.ocr.service.pytesseract.image_to_string",
             return_value="Colonial Home Region\nDay 288, 2139 Hours\nABLE\nMap intelligence",
         ):
-            result = service._extract_shard_data(img, box)
+            result = service._extract_shard_data(image=img, profile_height=35)
             assert result["shard"] == "ABLE"
             assert result["ingame_time"] == "288, 21:39"
 
@@ -344,16 +332,27 @@ class TestExtractShardData:
         """Test shard extraction with missing lines."""
         settings = get_settings()
         service = OCRService(settings)
-        img = np.ones((200, 400, 3), dtype=np.uint8) * 255
-        box: Box = (0, 0, 400, 200)
+        # Image size must be large enough for shard region detection
+        img = np.ones((1080, 1920, 3), dtype=np.uint8) * 255
 
         with patch(
             "verification_ocr.services.ocr.service.pytesseract.image_to_string",
             return_value="Some text only",
         ):
-            result = service._extract_shard_data(img, box)
+            result = service._extract_shard_data(image=img, profile_height=35)
             assert result["shard"] is None
             assert result["ingame_time"] is None
+
+    def test_returns_none_for_small_image(self) -> None:
+        """Test shard extraction returns None values for images too small."""
+        settings = get_settings()
+        service = OCRService(settings)
+        # Small image that won't have a shard region
+        img = np.ones((50, 50, 3), dtype=np.uint8) * 255
+
+        result = service._extract_shard_data(image=img, profile_height=35)
+        assert result["shard"] is None
+        assert result["ingame_time"] is None
 
 
 class TestExtractProfileData:
@@ -461,32 +460,6 @@ class TestVerify:
             with pytest.raises(ValueError, match="Could not detect profile"):
                 service.verify(img1_bytes, img2_bytes)
 
-    def test_raises_when_no_shard_detected(self) -> None:
-        """Test that missing shard raises ValueError."""
-        settings = get_settings()
-        service = OCRService(settings)
-        img1_bytes = self._create_test_image()
-        img2_bytes = self._create_test_image()
-
-        mock_boxes: list[Box] = [
-            (10, 10, 150, 35),
-            (170, 10, 50, 35),
-            (230, 10, 100, 35),
-            (340, 100, 200, 25),
-        ]
-
-        profile_call_count = [0]
-
-        def mock_detect_profile(*args: Any) -> list[Box] | None:
-            profile_call_count[0] += 1
-            # First call returns boxes, second returns None
-            return mock_boxes if profile_call_count[0] == 1 else None
-
-        with patch.object(service, "detect_profile_boxes", side_effect=mock_detect_profile):
-            with patch.object(service, "detect_shard_box", return_value=None):
-                with pytest.raises(ValueError, match="Could not detect shard"):
-                    service.verify(img1_bytes, img2_bytes)
-
     def test_returns_verification_on_success(self) -> None:
         """Test successful verification returns Verification object."""
         settings = get_settings()
@@ -500,7 +473,6 @@ class TestVerify:
             (230, 10, 100, 35),
             (340, 100, 200, 25),
         ]
-        mock_shard_box: Box = (50, 900, 340, 92)
 
         profile_call_count = [0]
 
@@ -509,28 +481,27 @@ class TestVerify:
             return mock_boxes if profile_call_count[0] == 1 else None
 
         with patch.object(service, "detect_profile_boxes", side_effect=mock_detect_profile):
-            with patch.object(service, "detect_shard_box", return_value=mock_shard_box):
+            with patch.object(
+                service,
+                "extract_profile_data",
+                return_value=ProfileData(
+                    name="TestPlayer",
+                    faction=Faction.COLONIAL,
+                    level=25,
+                    regiment="[TEST#1] Test Regiment",
+                ),
+            ):
                 with patch.object(
                     service,
-                    "extract_profile_data",
-                    return_value=ProfileData(
-                        name="TestPlayer",
-                        faction=Faction.COLONIAL,
-                        level=25,
-                        regiment="[TEST#1] Test Regiment",
-                    ),
+                    "_extract_shard_data",
+                    return_value=ShardData(shard="ABLE", ingame_time="288, 21:39"),
                 ):
-                    with patch.object(
-                        service,
-                        "_extract_shard_data",
-                        return_value=ShardData(shard="ABLE", ingame_time="288, 21:39"),
-                    ):
-                        result = service.verify(img1_bytes, img2_bytes)
-                        assert isinstance(result, Verification)
-                        assert result.name == "TestPlayer"
-                        assert result.faction == Faction.COLONIAL
-                        assert result.level == 25
-                        assert result.shard == "ABLE"
+                    result = service.verify(img1_bytes, img2_bytes)
+                    assert isinstance(result, Verification)
+                    assert result.name == "TestPlayer"
+                    assert result.faction == Faction.COLONIAL
+                    assert result.level == 25
+                    assert result.shard == "ABLE"
 
 
 class TestGetCurrentIngameTime:
