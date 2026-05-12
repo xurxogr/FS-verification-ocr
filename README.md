@@ -47,22 +47,35 @@ Environment variables (prefix `VOCR_`). Can be set in a `.env` file.
 
 ### API Server Settings
 
+<!-- AUTO-GENERATED from verification_ocr/core/settings/app_settings.py -->
+
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `VOCR_API_SERVER__HOST` | `127.0.0.1` | Server host |
 | `VOCR_API_SERVER__PORT` | `8000` | Server port |
+| `VOCR_API_SERVER__WORKERS` | `1` | Number of uvicorn workers |
 | `VOCR_API_SERVER__API_KEY` | `None` | API key for authentication (disabled if not set) |
 | `VOCR_API_SERVER__SERVE_FRONTEND` | `true` | Serve the frontend web interface |
 | `VOCR_API_SERVER__CORS_ALLOW_ORIGINS` | `[]` | CORS allowed origins (empty = no CORS) |
 | `VOCR_API_SERVER__RATE_LIMIT` | `10/minute` | Rate limit for `/verify` endpoint |
 | `VOCR_API_SERVER__MAX_UPLOAD_SIZE` | `52428800` | Max upload size in bytes (default 50MB) |
 
+<!-- END AUTO-GENERATED -->
+
 ### OCR Settings
+
+<!-- AUTO-GENERATED from verification_ocr/core/settings/app_settings.py -->
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `VOCR_OCR__LANGUAGE` | `eng+fra+deu+por+rus+chi_sim` | Tesseract language codes |
 | `VOCR_OCR__DEBUG_MODE` | `false` | Save debug images with detected regions |
+| `VOCR_OCR__TESSERACT_CMD` | Auto-detect | Path to tesseract binary |
+| `VOCR_OCR__SCALE_FACTOR` | `4` | Scale factor for small text extraction (1-10) |
+| `VOCR_OCR__CLAHE_CLIP_LIMIT` | `2.0` | CLAHE contrast enhancement clip limit |
+| `VOCR_OCR__CLAHE_GRID_SIZE` | `8` | CLAHE grid size for contrast enhancement |
+
+<!-- END AUTO-GENERATED -->
 
 ### War Settings
 

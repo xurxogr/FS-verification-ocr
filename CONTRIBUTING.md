@@ -62,9 +62,25 @@ This project follows strict code quality guidelines:
 - **Type Checking**: Code must pass `mypy` type checks
 - **Formatting**: Code is formatted with `ruff format`
 - **Testing**: Add tests for new features and bug fixes
-- **Coverage**: Maintain 100% test coverage
+- **Coverage**: Maintain 95%+ test coverage
 
 ### Running Quality Checks
+
+<!-- AUTO-GENERATED from pyproject.toml -->
+
+| Command | Description |
+|---------|-------------|
+| `vocr server` | Start the API server |
+| `vocr server --host 0.0.0.0` | Start server on all interfaces |
+| `vocr server --port 9000` | Start server on custom port |
+| `vocr server --reload` | Start with auto-reload for development |
+| `pytest` | Run tests with coverage (95% threshold) |
+| `ruff check verification_ocr/` | Run linter (E, W, F, I, B, UP, D rules) |
+| `ruff format verification_ocr/` | Format code |
+| `mypy verification_ocr/` | Type checking (strict mode) |
+| `pre-commit run --all-files` | Run all pre-commit hooks |
+
+<!-- END AUTO-GENERATED -->
 
 ```bash
 # Run linter
@@ -142,7 +158,7 @@ Update Docker configuration for production deployment
 
 ## Testing Guidelines
 
-- **Test Coverage**: Maintain 100% test coverage
+- **Test Coverage**: Maintain 95%+ test coverage (configured in pyproject.toml)
 - **Test Organization**: Use test classes to group related tests
 - **Fixtures**: Use pytest fixtures for common test setup
 - **Async Tests**: Mark async tests with `@pytest.mark.asyncio`
