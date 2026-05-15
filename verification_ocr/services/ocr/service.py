@@ -251,16 +251,20 @@ class OCRService:
 
         cropped = self._crop_box(image=image, box=shard_box)
 
-        # Preprocess: bilateral filter + adaptive threshold
-        filtered = cv2.bilateralFilter(src=cropped, d=9, sigmaColor=75, sigmaSpace=75)
-        gray = cv2.cvtColor(src=filtered, code=cv2.COLOR_BGR2GRAY)
-        processed = cv2.adaptiveThreshold(
+        # Preprocess: scale up 2x for better OCR accuracy on small text
+        gray = cv2.cvtColor(src=cropped, code=cv2.COLOR_BGR2GRAY)
+        scaled = cv2.resize(
             src=gray,
-            maxValue=255,
-            adaptiveMethod=cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-            thresholdType=cv2.THRESH_BINARY,
-            blockSize=51,
-            C=5,
+            dsize=None,
+            fx=2,
+            fy=2,
+            interpolation=cv2.INTER_CUBIC,
+        )
+        _, processed = cv2.threshold(
+            src=scaled,
+            thresh=0,
+            maxval=255,
+            type=cv2.THRESH_BINARY + cv2.THRESH_OTSU,
         )
 
         # Extract text using multiline mode
