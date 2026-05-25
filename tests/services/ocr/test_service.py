@@ -328,6 +328,21 @@ class TestExtractShardData:
             assert result["shard"] == "ABLE"
             assert result["ingame_time"] == "288, 21:39"
 
+    def test_extracts_live_shard(self) -> None:
+        """Test extraction of the LIVE shard name."""
+        settings = get_settings()
+        service = OCRService(settings)
+        # Image size must be large enough for shard region detection
+        img = np.ones((1080, 1920, 3), dtype=np.uint8) * 255
+
+        with patch(
+            "verification_ocr.services.ocr.service.pytesseract.image_to_string",
+            return_value="Colonial Home Region\nDay 288, 2139 Hours\nLIVE\nMap intelligence",
+        ):
+            result = service._extract_shard_data(image=img, profile_height=35)
+            assert result["shard"] == "LIVE"
+            assert result["ingame_time"] == "288, 21:39"
+
     def test_handles_missing_lines(self) -> None:
         """Test shard extraction with missing lines."""
         settings = get_settings()

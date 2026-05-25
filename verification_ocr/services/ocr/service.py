@@ -277,7 +277,7 @@ class OCRService:
         shard: str | None = None
 
         # Known shard names
-        shard_names = {"ABLE", "CHARLIE"}
+        shard_names = {"ABLE", "CHARLIE", "LIVE"}
 
         # Search all lines for the patterns (handles OCR noise/line shifts)
         for line in lines:
