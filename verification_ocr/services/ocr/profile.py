@@ -283,8 +283,11 @@ def _find_box_by_width(
         x, _, w, _ = box
         gap = x - after_x
 
-        # Skip if gap doesn't match expected ±tolerance
-        if abs(gap - expected_gap) > gap_tolerance:
+        # No lower bound on the gap: a detected box can run wider than the true
+        # grey box (antialiased text bleeds the contour outward), which only ever
+        # shrinks the measured gap. Require boxes not to overlap (>=1px) and
+        # reject only gaps that are wider than the model expects.
+        if gap < 1 or gap > expected_gap + gap_tolerance:
             continue
 
         # Check if width matches within tolerance
@@ -350,9 +353,13 @@ def _match_box_pattern(
             if len(row2_all) < 2:
                 continue
 
-            # Check Y gap is within tolerance of expected
+            # No lower bound on the Y gap (same reasoning as the X gap: detected
+            # box heights can run taller than the true grey box, shrinking the
+            # measured row gap). Require row 2 to sit below row 1 (no overlap)
+            # and reject only Y gaps that are wider than the model expects.
             row_gap = row2_y - row1_y
-            if abs(row_gap - expected_y_gap) / expected_y_gap > PROFILE_TOLERANCE:
+            y_gap_tolerance = math.ceil(expected_y_gap * PROFILE_TOLERANCE)
+            if row_gap < actual_height or row_gap > expected_y_gap + y_gap_tolerance:
                 continue
 
             row2_sorted = sorted(row2_all, key=lambda b: b[0])
