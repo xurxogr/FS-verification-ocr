@@ -343,6 +343,28 @@ class TestExtractShardData:
             assert result["shard"] == "LIVE"
             assert result["ingame_time"] == "288, 21:39"
 
+    def test_region_name_containing_shard_substring(self) -> None:
+        """Region name "Sableport" must not be misread as the ABLE shard.
+
+        Regression: case-insensitive substring matching used to match
+        "ABLE" inside "SABLEPORT", returning the wrong shard before the
+        real LIVE line was reached.
+        """
+        settings = get_settings()
+        service = OCRService(settings)
+        img = np.ones((1080, 1920, 3), dtype=np.uint8) * 255
+
+        with patch(
+            "verification_ocr.services.ocr.service.pytesseract.image_to_string",
+            return_value=(
+                "Sableport\nDay 77, 1628 Hours\nLIVE\n"
+                "Map intelligence was updated on Day 77, 1628 Hours"
+            ),
+        ):
+            result = service._extract_shard_data(image=img, profile_height=35)
+            assert result["shard"] == "LIVE"
+            assert result["ingame_time"] == "77, 16:28"
+
     def test_handles_missing_lines(self) -> None:
         """Test shard extraction with missing lines."""
         settings = get_settings()

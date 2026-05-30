@@ -276,29 +276,33 @@ class OCRService:
         ingame_time: str | None = None
         shard: str | None = None
 
-        # Known shard names
+        # Known shard names. Always rendered uppercase in-game, so matching is
+        # case-sensitive: this prevents a mixed-case region name such as
+        # "Sableport" from matching the "ABLE" shard.
         shard_names = {"ABLE", "CHARLIE", "LIVE"}
 
-        # Search all lines for the patterns (handles OCR noise/line shifts)
-        for line in lines:
-            # Look for time pattern: digits, comma, 4 digits
-            if ingame_time is None:
-                match = re.search(r"(\d{1,4})\s*,\s*(\d{4})", line)
-                if match:
-                    time_str = f"{match.group(1)}, {match.group(2)}"
-                    ingame_time = extract_day_and_hour(time_str)
+        # The shard box renders these lines, top to bottom:
+        #   Region name (e.g. "Sableport")
+        #   Day and time (e.g. "Day 77, 1628 Hours")  <- extracted
+        #   Shard name (e.g. "LIVE")                   <- next line, extracted
+        #   (empty)
+        #   Status message
+        # Anchor on the day/time line, then read the shard from the next line.
+        # This is robust to the region-name line drifting in or out of the crop.
+        for i, line in enumerate(lines):
+            match = re.search(r"(\d{1,4})\s*,\s*(\d{4})", line)
+            if match is None:
+                continue
 
-            # Look for shard name
-            if shard is None:
-                line_upper = line.upper()
-                for name in shard_names:
-                    if name in line_upper:
-                        shard = name
-                        break
+            time_str = f"{match.group(1)}, {match.group(2)}"
+            ingame_time = extract_day_and_hour(time_str)
 
-            # Stop early if both found
-            if ingame_time and shard:
-                break
+            # Shard name is the line immediately after the day/time line.
+            if i + 1 < len(lines):
+                candidate = lines[i + 1].strip()
+                if candidate in shard_names:
+                    shard = candidate
+            break
 
         return ShardData(
             shard=shard,
