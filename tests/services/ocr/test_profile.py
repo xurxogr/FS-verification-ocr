@@ -321,7 +321,6 @@ class TestFindMatchingBoxes:
             expected_ratios=PROFILE_ROW1_WIDTH_RATIOS,
             ref_aspect=PROFILE_ROW1_REF_ASPECT,
             expected_gap=4,
-            gap_tolerance=2,
         )
         assert result is None
 
@@ -341,7 +340,6 @@ class TestFindMatchingBoxes:
             expected_ratios=PROFILE_ROW1_WIDTH_RATIOS,
             ref_aspect=PROFILE_ROW1_REF_ASPECT,
             expected_gap=gap,
-            gap_tolerance=2,
         )
         # Should find all 4 boxes
         assert result is not None
@@ -361,7 +359,6 @@ class TestFindBoxByWidth:
             expected_width=60,
             after_x=100,
             expected_gap=4,
-            gap_tolerance=2,
         )
         assert result is None
 
@@ -375,7 +372,6 @@ class TestFindBoxByWidth:
             expected_width=60,
             after_x=100,
             expected_gap=4,
-            gap_tolerance=2,
         )
         assert result is None
 
@@ -389,7 +385,6 @@ class TestFindBoxByWidth:
             expected_width=60,
             after_x=100,
             expected_gap=4,
-            gap_tolerance=2,
         )
         assert result == (104, 100, 60, 35)
 
@@ -405,6 +400,5 @@ class TestFindBoxByWidth:
             expected_width=60,
             after_x=100,
             expected_gap=4,
-            gap_tolerance=2,
         )
         assert result == (104, 100, 60, 35)

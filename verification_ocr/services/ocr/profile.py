@@ -35,8 +35,8 @@ PROFILE_ROW1_WIDTH_RATIOS = [1.0, 0.30, 0.65, 0.65]
 # Row 2 at 1080p: 264px, 264px (commends, communications)
 PROFILE_ROW2_WIDTH_RATIOS = [1.0, 1.0]
 
-# Tolerance for all ratio/proportion matching (5%)
-PROFILE_TOLERANCE = 0.05
+# Tolerance for all ratio/proportion matching (10%)
+PROFILE_TOLERANCE = 0.1
 
 # Gap between boxes (4px at 35px height, used for X and Y gaps)
 PROFILE_GAP_RATIO = 4 / PROFILE_REF_HEIGHT
@@ -204,7 +204,6 @@ def _find_matching_boxes(
     expected_ratios: list[float],
     ref_aspect: float,
     expected_gap: float,
-    gap_tolerance: float,
 ) -> list[Box] | None:
     """Find boxes matching expected width ratios, skipping non-matching boxes.
 
@@ -217,7 +216,6 @@ def _find_matching_boxes(
         expected_ratios: Expected width ratios relative to first box.
         ref_aspect: Expected aspect ratio (width/height) for reference box.
         expected_gap: Expected gap between adjacent boxes.
-        gap_tolerance: Allowed deviation from expected gap (±tolerance).
 
     Returns:
         Matching boxes in X order, or None if no valid pattern found.
@@ -245,7 +243,6 @@ def _find_matching_boxes(
                 expected_width=expected_w,
                 after_x=matched[-1][0] + matched[-1][2],
                 expected_gap=expected_gap,
-                gap_tolerance=gap_tolerance,
             )
             if found is None:
                 break
@@ -265,7 +262,6 @@ def _find_box_by_width(
     expected_width: float,
     after_x: int,
     expected_gap: float,
-    gap_tolerance: float,
 ) -> Box | None:
     """Find a box matching expected width within gap constraints.
 
@@ -274,11 +270,15 @@ def _find_box_by_width(
         expected_width: Expected box width (can be float from ratio calculation).
         after_x: X position after which to search (right edge of previous box).
         expected_gap: Expected gap from after_x to box start.
-        gap_tolerance: Allowed deviation from expected gap (±tolerance).
 
     Returns:
         First matching box, or None if not found.
     """
+    # Apply the tolerance inside the multiplication and round up, rather than
+    # rounding the tolerance margin alone and adding it to the original gap.
+    # This keeps a meaningful margin even for small expected gaps (where
+    # ceil(expected_gap * tolerance) collapses to 1px).
+    max_gap = math.ceil(expected_gap * (1 + PROFILE_TOLERANCE))
     for box in boxes:
         x, _, w, _ = box
         gap = x - after_x
@@ -287,7 +287,7 @@ def _find_box_by_width(
         # grey box (antialiased text bleeds the contour outward), which only ever
         # shrinks the measured gap. Require boxes not to overlap (>=1px) and
         # reject only gaps that are wider than the model expects.
-        if gap < 1 or gap > expected_gap + gap_tolerance:
+        if gap < 1 or gap > max_gap:
             continue
 
         # Check if width matches within tolerance
@@ -339,7 +339,6 @@ def _match_box_pattern(
             expected_ratios=PROFILE_ROW1_WIDTH_RATIOS,
             ref_aspect=PROFILE_ROW1_REF_ASPECT,
             expected_gap=expected_x_gap,
-            gap_tolerance=gap_tolerance,
         )
         if row1 is None:
             continue
@@ -358,8 +357,8 @@ def _match_box_pattern(
             # measured row gap). Require row 2 to sit below row 1 (no overlap)
             # and reject only Y gaps that are wider than the model expects.
             row_gap = row2_y - row1_y
-            y_gap_tolerance = math.ceil(expected_y_gap * PROFILE_TOLERANCE)
-            if row_gap < actual_height or row_gap > expected_y_gap + y_gap_tolerance:
+            max_y_gap = math.ceil(expected_y_gap * (1 + PROFILE_TOLERANCE))
+            if row_gap < actual_height or row_gap > max_y_gap:
                 continue
 
             row2_sorted = sorted(row2_all, key=lambda b: b[0])
@@ -370,7 +369,6 @@ def _match_box_pattern(
                 expected_ratios=PROFILE_ROW2_WIDTH_RATIOS,
                 ref_aspect=PROFILE_ROW2_REF_ASPECT,
                 expected_gap=expected_x_gap,
-                gap_tolerance=gap_tolerance,
             )
             if row2 is None:
                 continue
