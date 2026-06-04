@@ -365,6 +365,31 @@ class TestExtractShardData:
             assert result["shard"] == "LIVE"
             assert result["ingame_time"] == "77, 16:28"
 
+    def test_extracts_russian_locale_format(self) -> None:
+        """Russian locale renders the day/time line differently than English.
+
+        Regression: the anchor regex assumed the English layout
+        "Day 315, 1732 Hours" where the day number sits right before the
+        comma and the time is 4 digits. The Russian layout
+        "212-й День, 12:41 Часов" (OCR'd as "212-4 Deb, 12:41 YacoB") puts a
+        word between the number and the comma and uses a colon in the time,
+        so the anchor never matched and the LIVE line below it was missed.
+        """
+        settings = get_settings()
+        service = OCRService(settings)
+        img = np.ones((1080, 1920, 3), dtype=np.uint8) * 255
+
+        with patch(
+            "verification_ocr.services.ocr.service.pytesseract.image_to_string",
+            return_value=(
+                "Terminus\n212-4 Deb, 12:41 YacoB\nLIVE\n"
+                "Uncbopmauya Ha KapTe 6bina o6HoBNeHa B 210- DeHb,"
+            ),
+        ):
+            result = service._extract_shard_data(image=img, profile_height=35)
+            assert result["shard"] == "LIVE"
+            assert result["ingame_time"] == "212, 12:41"
+
     def test_handles_missing_lines(self) -> None:
         """Test shard extraction with missing lines."""
         settings = get_settings()

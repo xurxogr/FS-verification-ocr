@@ -289,8 +289,15 @@ class OCRService:
         #   Status message
         # Anchor on the day/time line, then read the shard from the next line.
         # This is robust to the region-name line drifting in or out of the crop.
+        #
+        # The line is locale-dependent. English renders "Day 315, 1732 Hours"
+        # (day number immediately before the comma, 4-digit time). Russian
+        # renders "212-й День, 12:41 Часов" (the word "День" sits between the
+        # number and the comma, and the time uses a colon). So we capture the
+        # first number on the line as the day, allow any text up to the first
+        # comma, then read the time as either HHMM or HH:MM.
         for i, line in enumerate(lines):
-            match = re.search(r"(\d{1,4})\s*,\s*(\d{4})", line)
+            match = re.search(r"(\d{1,4}).*?,\s*(\d{1,2}:?\d{2})", line)
             if match is None:
                 continue
 
