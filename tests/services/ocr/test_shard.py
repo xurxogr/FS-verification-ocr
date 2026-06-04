@@ -5,6 +5,8 @@ import numpy as np
 from verification_ocr.services.ocr.shard import (
     SHARD_CROP_HEIGHT_RATIO,
     SHARD_CROP_WIDTH_RATIO,
+    SHARD_OFFSET_BOTTOM_RATIO,
+    SHARD_OFFSET_X_RATIO,
     detect_shard_region,
 )
 
@@ -29,7 +31,13 @@ class TestDetectShardRegion:
 
         assert result is not None
         x, y, w, h = result
-        assert x == 0  # Bottom-left corner
+        # Reference measurements at 1920x1080, profile_height=35
+        assert x == 34
+        assert y == 1080 - 112
+        assert w == 150
+        assert h == 48
+        assert x == int(35 * SHARD_OFFSET_X_RATIO)
+        assert y == 1080 - int(35 * SHARD_OFFSET_BOTTOM_RATIO)
         assert w == int(35 * SHARD_CROP_WIDTH_RATIO)
         assert h == int(35 * SHARD_CROP_HEIGHT_RATIO)
 
@@ -49,8 +57,9 @@ class TestDetectShardRegion:
 
         assert result is not None
         _, y, _, h = result
-        # Box should be at bottom: y + h should equal image height
-        assert y + h == 1080
+        # Block sits near (but not flush with) the bottom edge
+        assert y > 1080 * 0.8
+        assert y + h <= 1080
 
     def test_scales_with_profile_height(self) -> None:
         """Test that box scales with profile height."""

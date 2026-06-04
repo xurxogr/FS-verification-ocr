@@ -283,7 +283,7 @@ class OCRService:
 
         # The shard box renders these lines, top to bottom:
         #   Region name (e.g. "Sableport")
-        #   Day and time (e.g. "Day 77, 1628 Hours")  <- extracted
+        #   Day and time (e.g. "Day 77, 1628 Hours")  <- next line, extracted
         #   Shard name (e.g. "LIVE")                   <- next line, extracted
         #   (empty)
         #   Status message
