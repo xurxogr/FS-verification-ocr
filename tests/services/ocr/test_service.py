@@ -416,6 +416,47 @@ class TestExtractShardData:
         assert result["shard"] is None
         assert result["ingame_time"] is None
 
+    def test_retries_larger_scale_when_shard_misread(self) -> None:
+        """A shard name misread at the first scale is recovered at a larger one.
+
+        At low resolution tesseract misreads the shard name (e.g. "LIVE" as
+        "UVE") at the smallest upscale but reads it correctly at a larger one.
+        _extract_shard_data tries increasing scales and accepts the first pass
+        that yields a recognised shard name.
+        """
+        settings = get_settings()
+        service = OCRService(settings)
+        img = np.ones((1080, 1920, 3), dtype=np.uint8) * 255
+
+        with patch(
+            "verification_ocr.services.ocr.service.pytesseract.image_to_string",
+            side_effect=[
+                "Endless Shore\n355-4 feb, 12:40 vacoe\nUVE\nMap intel",  # misread
+                "Endless Shore\n355-4 feb, 12:40 vacoe\nLIVE\nMap intel",  # correct
+            ],
+        ):
+            result = service._extract_shard_data(image=img, profile_height=24)
+            assert result["shard"] == "LIVE"
+            assert result["ingame_time"] == "355, 12:40"
+
+    def test_returns_time_when_shard_never_recognised(self) -> None:
+        """If no scale yields a valid shard name, the time is still returned.
+
+        Every scale misreads the shard name, but the day/time line parses, so
+        the fallback keeps the in-game time while leaving the shard None.
+        """
+        settings = get_settings()
+        service = OCRService(settings)
+        img = np.ones((1080, 1920, 3), dtype=np.uint8) * 255
+
+        with patch(
+            "verification_ocr.services.ocr.service.pytesseract.image_to_string",
+            return_value="Endless Shore\n355-4 feb, 12:40 vacoe\nUVE\nMap intel",
+        ):
+            result = service._extract_shard_data(image=img, profile_height=24)
+            assert result["shard"] is None
+            assert result["ingame_time"] == "355, 12:40"
+
 
 class TestExtractProfileData:
     """Tests for extract_profile_data method."""

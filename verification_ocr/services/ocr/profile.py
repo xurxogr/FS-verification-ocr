@@ -41,9 +41,14 @@ PROFILE_TOLERANCE = 0.1
 # Gap between boxes (4px at 35px height, used for X and Y gaps)
 PROFILE_GAP_RATIO = 4 / PROFILE_REF_HEIGHT
 
-# Minimum box dimensions (based on 768p, smallest supported)
-PROFILE_MIN_BOX_HEIGHT = 25
-PROFILE_MIN_BOX_WIDTH = 43
+# Minimum box dimensions: the 1080p reference boxes scaled down to 768p (the
+# smallest supported resolution). Floor the result so a box rendered at exactly
+# 768p still clears the minimum (35px@1080p -> 35 * 768/1080 = 24.9 -> 24, not 25).
+# Smallest box is the icon: row 1 username reference width * the 0.30 icon ratio.
+PROFILE_MIN_BOX_HEIGHT = math.floor(PROFILE_REF_HEIGHT * 768 / 1080)
+PROFILE_MIN_BOX_WIDTH = math.floor(
+    PROFILE_REF_HEIGHT * PROFILE_ROW1_REF_ASPECT * PROFILE_ROW1_WIDTH_RATIOS[1] * 768 / 1080
+)
 
 
 def detect_profile_boxes(image: MatLike) -> list[Box] | None:

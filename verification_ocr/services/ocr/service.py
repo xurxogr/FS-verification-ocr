@@ -30,6 +30,15 @@ logger = logging.getLogger(__name__)
 # Minimum image size for processing
 MIN_IMAGE_DIMENSION = 100
 
+# Shard OCR upscaling. The shard text block is tiny at low resolution (~7px tall
+# at 768p) and tesseract misreads it (e.g. "LIVE" -> "UVE") at a single scale.
+# The misreads are NOT monotonic in scale: at 768p the shard name reads correctly
+# at 4x but wrongly at 2x, 3x and 6x. So rather than pick one factor, try a few
+# increasing upscales and accept the first that yields a recognised shard name.
+# A higher-resolution image gets a correct read at the first (smallest) scale and
+# stops there; a low-resolution image falls through to the larger scales.
+SHARD_OCR_SCALES = (2.0, 4.0, 8.0)
+
 
 def _get_current_ingame_time() -> str | None:
     """Get the current in-game time formatted as 'day, HH:MM'.
@@ -59,6 +68,55 @@ class ShardData(TypedDict):
 
     shard: str | None
     ingame_time: str | None
+
+
+# Known shard names. Always rendered uppercase in-game, so matching is
+# case-sensitive: this prevents a mixed-case region name such as "Sableport"
+# from matching the "ABLE" shard.
+SHARD_NAMES = frozenset({"ABLE", "CHARLIE", "LIVE"})
+
+
+def _parse_shard_lines(lines: list[str]) -> ShardData:
+    """Parse OCR'd shard-box lines into a shard name and in-game time.
+
+    The shard box renders these lines, top to bottom:
+        Region name (e.g. "Sableport")
+        Day and time (e.g. "Day 77, 1628 Hours")  <- anchor, time extracted
+        Shard name (e.g. "LIVE")                   <- next line, extracted
+        (empty)
+        Status message
+
+    Anchors on the day/time line, then reads the shard from the next line. This
+    is robust to the region-name line drifting in or out of the crop, and keeps
+    region names from being matched as shard names.
+
+    The day/time line is locale-dependent. English renders "Day 315, 1732 Hours"
+    (day number immediately before the comma, 4-digit time). Russian renders
+    "212-й День, 12:41 Часов" (the word "День" sits between the number and the
+    comma, and the time uses a colon). So we capture the first number on the line
+    as the day, allow any text up to the first comma, then read the time as
+    either HHMM or HH:MM.
+
+    Args:
+        lines (list[str]): Non-empty, stripped OCR output lines.
+
+    Returns:
+        ShardData: Parsed shard name and in-game time (either may be None).
+    """
+    for i, line in enumerate(lines):
+        match = re.search(r"(\d{1,4}).*?,\s*(\d{1,2}:?\d{2})", line)
+        if match is None:
+            continue
+
+        ingame_time = extract_day_and_hour(f"{match.group(1)}, {match.group(2)}")
+
+        shard: str | None = None
+        if i + 1 < len(lines) and lines[i + 1].strip() in SHARD_NAMES:
+            shard = lines[i + 1].strip()
+
+        return ShardData(shard=shard, ingame_time=ingame_time)
+
+    return ShardData(shard=None, ingame_time=None)
 
 
 class OCRService:
@@ -250,71 +308,37 @@ class OCRService:
             return ShardData(shard=None, ingame_time=None)
 
         cropped = self._crop_box(image=image, box=shard_box)
-
-        # Preprocess: scale up 2x for better OCR accuracy on small text
         gray = cv2.cvtColor(src=cropped, code=cv2.COLOR_BGR2GRAY)
-        scaled = cv2.resize(
-            src=gray,
-            dsize=None,
-            fx=2,
-            fy=2,
-            interpolation=cv2.INTER_CUBIC,
-        )
-        _, processed = cv2.threshold(
-            src=scaled,
-            thresh=0,
-            maxval=255,
-            type=cv2.THRESH_BINARY + cv2.THRESH_OTSU,
-        )
 
-        # Extract text using multiline mode
-        text: str = pytesseract.image_to_string(image=processed, config="--psm 6")
+        # Try increasing upscale factors and accept the first that yields a
+        # recognised shard name (see SHARD_OCR_SCALES). Keep the first pass that
+        # produced an in-game time as a fallback, so the time is still returned
+        # even when no scale reads the shard name cleanly.
+        fallback = ShardData(shard=None, ingame_time=None)
+        for scale in SHARD_OCR_SCALES:
+            scaled = cv2.resize(
+                src=gray,
+                dsize=None,
+                fx=scale,
+                fy=scale,
+                interpolation=cv2.INTER_CUBIC,
+            )
+            _, processed = cv2.threshold(
+                src=scaled,
+                thresh=0,
+                maxval=255,
+                type=cv2.THRESH_BINARY + cv2.THRESH_OTSU,
+            )
+            text: str = pytesseract.image_to_string(image=processed, config="--psm 6")
+            lines = [line.strip() for line in text.strip().split("\n") if line.strip()]
 
-        # Parse lines and extract data
-        lines = [line.strip() for line in text.strip().split("\n") if line.strip()]
+            data = _parse_shard_lines(lines)
+            if data["shard"] is not None:
+                return data
+            if fallback["ingame_time"] is None and data["ingame_time"] is not None:
+                fallback = data
 
-        ingame_time: str | None = None
-        shard: str | None = None
-
-        # Known shard names. Always rendered uppercase in-game, so matching is
-        # case-sensitive: this prevents a mixed-case region name such as
-        # "Sableport" from matching the "ABLE" shard.
-        shard_names = {"ABLE", "CHARLIE", "LIVE"}
-
-        # The shard box renders these lines, top to bottom:
-        #   Region name (e.g. "Sableport")
-        #   Day and time (e.g. "Day 77, 1628 Hours")  <- next line, extracted
-        #   Shard name (e.g. "LIVE")                   <- next line, extracted
-        #   (empty)
-        #   Status message
-        # Anchor on the day/time line, then read the shard from the next line.
-        # This is robust to the region-name line drifting in or out of the crop.
-        #
-        # The line is locale-dependent. English renders "Day 315, 1732 Hours"
-        # (day number immediately before the comma, 4-digit time). Russian
-        # renders "212-й День, 12:41 Часов" (the word "День" sits between the
-        # number and the comma, and the time uses a colon). So we capture the
-        # first number on the line as the day, allow any text up to the first
-        # comma, then read the time as either HHMM or HH:MM.
-        for i, line in enumerate(lines):
-            match = re.search(r"(\d{1,4}).*?,\s*(\d{1,2}:?\d{2})", line)
-            if match is None:
-                continue
-
-            time_str = f"{match.group(1)}, {match.group(2)}"
-            ingame_time = extract_day_and_hour(time_str)
-
-            # Shard name is the line immediately after the day/time line.
-            if i + 1 < len(lines):
-                candidate = lines[i + 1].strip()
-                if candidate in shard_names:
-                    shard = candidate
-            break
-
-        return ShardData(
-            shard=shard,
-            ingame_time=ingame_time,
-        )
+        return fallback
 
     def _detect_faction(self, image: MatLike) -> Faction | None:
         """Detect faction from icon using template matching.
