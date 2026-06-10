@@ -14,12 +14,12 @@ type Box = tuple[int, int, int, int]
 #
 # Reference measurements taken at 1920x1080, where a profile box is
 # PROFILE_REF_HEIGHT (35) px tall:
-#   top-left corner: 34px right of the left edge, 112px up from the bottom edge
-#   size: 150x48
+#   top-left corner: 28px right of the left edge, 112px up from the bottom edge
+#   size: 180x48
 # Expressed relative to profile_height so the crop scales with resolution.
-SHARD_OFFSET_X_RATIO = 34 / PROFILE_REF_HEIGHT
+SHARD_OFFSET_X_RATIO = 28 / PROFILE_REF_HEIGHT
 SHARD_OFFSET_BOTTOM_RATIO = 112 / PROFILE_REF_HEIGHT
-SHARD_CROP_WIDTH_RATIO = 150 / PROFILE_REF_HEIGHT
+SHARD_CROP_WIDTH_RATIO = 180 / PROFILE_REF_HEIGHT
 SHARD_CROP_HEIGHT_RATIO = 48 / PROFILE_REF_HEIGHT
 
 

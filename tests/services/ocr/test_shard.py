@@ -32,9 +32,10 @@ class TestDetectShardRegion:
         assert result is not None
         x, y, w, h = result
         # Reference measurements at 1920x1080, profile_height=35
-        assert x == 34
+        # (X offset re-measured at 4K: 56px / 2 = 28px at 1080p)
+        assert x == 28
         assert y == 1080 - 112
-        assert w == 150
+        assert w == 180
         assert h == 48
         assert x == int(35 * SHARD_OFFSET_X_RATIO)
         assert y == 1080 - int(35 * SHARD_OFFSET_BOTTOM_RATIO)
